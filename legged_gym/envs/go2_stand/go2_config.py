@@ -45,7 +45,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         foot_name = "foot"
         penalize_contacts_on = ["thigh", "calf"]
         terminate_after_contacts_on = []
-        flip_visual_attachments = False
+        flip_visual_attachments = True
         self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(LeggedRobotCfg.rewards):
@@ -73,7 +73,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_base_mass = True
         added_mass_range = [-5., 5.]
 
-class Go1RoughCfgPPO(LeggedRobotCfgPPO):
+class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     seed = 1
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
@@ -82,5 +82,5 @@ class Go1RoughCfgPPO(LeggedRobotCfgPPO):
         
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
-        experiment_name = 'go1'
+        experiment_name = 'go2_stand'
         max_iterations = 500

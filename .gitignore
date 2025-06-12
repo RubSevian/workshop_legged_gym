@@ -57,3 +57,7 @@ runs
 # other
 *.egg-info
 __pycache__
+
+
+
+isaacgym/

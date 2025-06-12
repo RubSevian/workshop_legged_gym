@@ -3,7 +3,7 @@ from legged_gym.utils.isaacgym_utils import get_euler_xyz
 from legged_gym.envs import LeggedRobot
 from isaacgym import gymtorch
 
-class Go1(LeggedRobot):
+class Go2(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
