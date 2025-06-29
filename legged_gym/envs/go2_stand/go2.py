@@ -72,18 +72,26 @@ class Go2(LeggedRobot):
         noise_vec[33:45] = 0. # previous actions
         return noise_vec
 
+    
     def _reward_tracking_pitch(self):
         # Tracking
-        base_quat = self.root_states[:, 3:7]
-        euler = get_euler_xyz(base_quat)
-        episode_time_buf = self.episode_length_buf * self.dt
-        pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
-        pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
-        error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
-        return torch.exp(-error/self.cfg.rewards.tracking_sigma)
+        base_quat = self.root_states[:, 3:7]  # [num_envs, 4]
+        euler = get_euler_xyz(base_quat)  # Tuple of [num_envs] tensors: (roll, pitch, yaw)
+        roll = euler[:,0]  # [num_envs]
+        pitch = euler[:,1]  # [num_envs]
+        pitch_error = torch.abs(pitch - self.cfg.commands.pitch)  # [num_envs]
+        roll_error = torch.abs(roll - self.cfg.commands.roll)  # [num_envs]
+        total_error = pitch_error + roll_error  # [num_envs]
+        return torch.exp(-2 * total_error / self.cfg.rewards.tracking_sigma)
+        # episode_time_buf = self.episode_length_buf * self.dt
+        # pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
+        # pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
+        # error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
+        # print (self.cfg.)
+        # return torch.exp(-error/self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
-        hip_names = ["RR_hip_joint", "RL_hip_joint"]
+        hip_names = ["FR_hip_joint", "FL_hip_joint","RR_hip_joint", "RL_hip_joint"]
         self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(hip_names):
             self.hip_indices[i] = self.dof_names.index(name)
@@ -94,7 +102,7 @@ class Go2(LeggedRobot):
         desired_contact = torch.sum(contact[:, self.desired_contact_indices], dim=1)  # [num_envs]
         undesired_contact = torch.sum(contact[:, self.undesired_contact_indices], dim=1)  # [num_envs]
         slip_penalty = -0.5 * torch.sum(torch.norm(self.contact_forces[:, self.desired_contact_indices, 0:2], dim=2), dim=1)  # [num_envs]
-        return 1.0 * desired_contact - 3.0 * undesired_contact + slip_penalty  # [num_envs]
+        return 1.0 * desired_contact - 4.0 * undesired_contact + slip_penalty  # [num_envs]
     
     def _reward_base_height(self):
         base_height = self.root_states[:, 2]
@@ -115,7 +123,7 @@ class Go2(LeggedRobot):
 
     def _reward_rear_feet_contact_and_air(self):
         # Contact reward for rear feet
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 80.0  # [num_envs, 2]
+        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
         contact_filt = torch.logical_or(contact, self.last_contacts[:, self.desired_contact_indices])  # [num_envs, 2]
         self.last_contacts[:, self.desired_contact_indices] = contact
         contact_reward = torch.sum(1.0 * contact_filt, dim=1)  # [num_envs]

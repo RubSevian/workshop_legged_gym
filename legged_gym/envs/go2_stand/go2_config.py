@@ -52,31 +52,31 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.75
-        base_height_target = 0.85 # Match init_state pos
+        base_height_target = 0.56 # Match init_state pos
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 0.8  # Disable for standing task
-            tracking_ang_vel = 0.8
+            tracking_lin_vel = 1.5  # Disable for standing task
+            tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 3  # Increased
-            hip_pos = -2.5#-1.0  # Activate to control rear joints
-            com_over_support = 0.5#0.5#3.0  # Increased
+            tracking_pitch = 5 # Increased
+            rear_feet_contact_and_air = 0.5#1#3
+            hip_pos =-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 0#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -1e-6
-            dof_vel = -5e-4
-            dof_acc = -1e-7 #es2432
+            torques = -0.00001
+            dof_vel = -0.00001
+            dof_acc = -2.5e-7
             dof_pos_limits = -10.0
-            base_height =0# 6.0  # Increased
-            action_rate = 0#-0.1
+            base_height =3.5 # Increased
             collision = 0.01
             termination = 0.0
             dof_vel_limits = 0.0
-            torque_limits = 0.0
-            stumble = 0.0
-            stand_still = 0.0
-            feet_contact_forces = 0 #0.05
+            feet_stumble = -0.0 
+            action_rate = -0.01
+            stand_still = -0.
+            feet_contact_forces = 0.00005 #0.05
 
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
