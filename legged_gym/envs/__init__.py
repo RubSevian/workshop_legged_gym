@@ -46,6 +46,8 @@ from .go1.go1_config import Go1RoughCfg, Go1RoughCfgPPO
 from .go1.go1 import Go1
 from .go2_stand.go2_config import Go2RoughCfg, Go2RoughCfgPPO
 from .go2_stand.go2 import Go2
+from .go2_walk.go2 import Go2_Walk
+from .go2_walk.go2_config import Go2_Walk_Cfg , Go2_Walk_CfgPPO
 
 
 
@@ -56,3 +58,4 @@ task_registry.register( "a1", LeggedRobot, A1RoughCfg(), A1RoughCfgPPO() )
 task_registry.register( "cassie", Cassie, CassieRoughCfg(), CassieRoughCfgPPO() )
 task_registry.register( "go1", Go1, Go1RoughCfg(), Go1RoughCfgPPO() )
 task_registry.register( "go2_stand", Go2, Go2RoughCfg(), Go2RoughCfgPPO() )
+task_registry.register( "go2_walk",Go2_Walk,Go2_Walk_Cfg(),Go2_Walk_CfgPPO())
