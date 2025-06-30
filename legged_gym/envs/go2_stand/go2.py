@@ -125,7 +125,7 @@ class Go2(LeggedRobot):
                 # Penalize base height away from target
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
         error = torch.square(base_height - 0.45)
-        return torch.exp(-2* error)
+        return torch.exp(-1* error)
 
     def _reward_com_over_support(self):
         base_pos = self.body_state_buffer[:, self.base_index, 0:3]

@@ -52,32 +52,32 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.75
-        base_height_target = 0.42 # Match init_state pos
+        base_height_target = 0.60 # Match init_state pos
         cycle_time = 1
         bias = 0.3
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 1.5  # Disable for standing task
-            tracking_ang_vel = 1.5
+            tracking_lin_vel = 2  # Disable for standing task
+            tracking_ang_vel = 2
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 10 # Increased
-            rear_feet_contact_and_air = 5#4#1.5#1#1#3
-            hip_pos =3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 0#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            tracking_pitch = 7 # Increased
+            rear_feet_contact_and_air = 3#4#1.5#1#1#3
+            hip_pos =1#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 0#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -0.0005
+            torques = -0.002
             dof_vel = 0#-0.00001
-            dof_acc = 0#-2.5e-7
-            dof_pos_limits = -10.0
-            base_height =0#3#3 # Increased
-            collision = 0.01
-            termination = -10
+            dof_acc = -2.5e-6
+            dof_pos_limits = 0#-5.0
+            base_height =1.5#3#3 # Increased
+            collision = 0.#0.0001
+            termination = 0#10
             dof_vel_limits = 0.0
-            feet_stumble = -0.0 
-            action_rate = -0.01
-            stand_still = -0.
+            feet_stumble = 0#-0.0 
+            action_rate = -0.1
+            stand_still = 0#-0.
             feet_contact_forces = 0.001 #0.05
 
             # tracking_lin_vel = 1.5
@@ -110,8 +110,8 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
-            lin_vel_y = [-0.5, 0.5] # Небольшое боковое движение
+            lin_vel_x = [-0.25, 0.25]  # Поощряем движение вперёд
+            lin_vel_y = [-0.25, 0.25] # Небольшое боковое движение
             ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
 
