@@ -19,21 +19,21 @@ class Go2RoughCfg(LeggedRobotCfg):
             'RR_hip_joint': -0,  # [rad]
 
             'FL_thigh_joint': 0.8,  # [rad]
-            'RL_thigh_joint': 1.1,  # [rad]
+            'RL_thigh_joint': 0.8,  # [rad]
             'FR_thigh_joint': 0.8,  # [rad]
-            'RR_thigh_joint': 1.1,  # [rad]
+            'RR_thigh_joint': 0.8,  # [rad]
 
             'FL_calf_joint': -1.5,  # [rad]
-            'RL_calf_joint': -1.8,  # [rad]
+            'RL_calf_joint': -1.5,  # [rad]
             'FR_calf_joint': -1.5,  # [rad]
-            'RR_calf_joint': -1.8,  # [rad]
+            'RR_calf_joint': -1.5,  # [rad]
         }
 
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
         control_type = 'P'
-        stiffness = {'joint': 50.}  # [N*m/rad]
-        damping = {'joint': 1.25}     # [N*m*s/rad]
+        stiffness = {'joint': 45.}  # [N*m/rad]
+        damping = {'joint': 1.}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
         # decimation: Number of control action updates @ sim DT per policy DT
@@ -53,32 +53,32 @@ class Go2RoughCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.75
         base_height_target = 0.42 # Match init_state pos
-        cycle_time = 0.8
-        bias = 0.1
+        cycle_time = 1
+        bias = 0.3
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 1.5  # Disable for standing task
             tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 8 # Increased
+            tracking_pitch = 10 # Increased
             rear_feet_contact_and_air = 5#4#1.5#1#1#3
-            hip_pos =2#-1.5 #-2.#-1.0  # Activate to control rear joints
+            hip_pos =3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -0.0003
-            dof_vel = -0.00001
-            dof_acc = -2.5e-7
+            torques = -0.0005
+            dof_vel = 0#-0.00001
+            dof_acc = 0#-2.5e-7
             dof_pos_limits = -10.0
-            base_height =0#3 # Increased
+            base_height =0#3#3 # Increased
             collision = 0.01
             termination = -10
             dof_vel_limits = 0.0
             feet_stumble = -0.0 
             action_rate = -0.01
             stand_still = -0.
-            feet_contact_forces = 0.00001 #0.05
+            feet_contact_forces = 0.001 #0.05
 
             # tracking_lin_vel = 1.5
             # tracking_ang_vel = 1.5
@@ -132,4 +132,4 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'go2_stand'
-        max_iterations = 3000
+        max_iterations = 10000

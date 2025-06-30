@@ -102,7 +102,7 @@ class Go2(LeggedRobot):
         # return torch.exp(-error/self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
-        hip_names = ["RR_hip_joint", "RL_hip_joint"]
+        hip_names = ["FR_hip_joint", "FL_hip_joint","RR_hip_joint", "RL_hip_joint"]
         self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(hip_names):
             self.hip_indices[i] = self.dof_names.index(name)
@@ -146,6 +146,6 @@ class Go2(LeggedRobot):
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -1.0 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -10.0 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
+        contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
