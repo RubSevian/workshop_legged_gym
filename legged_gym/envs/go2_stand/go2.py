@@ -28,9 +28,6 @@ class Go2(LeggedRobot):
         self.last_contacts = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.bool, device=self.device)
         self.num_bodies = self.gym.get_actor_rigid_body_count(self.envs[0], self.actor_handles[0])
         self.feet_air_time = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.float, device=self.device)
-        # Initialize stance mask for feet contact reward
-        self.stance_mask = torch.zeros(self.num_bodies, dtype=torch.bool, device=self.device)
-        self.stance_mask[self.desired_contact_indices] = True
 
     def compute_observations(self):
         """ Computes observations
@@ -72,6 +69,20 @@ class Go2(LeggedRobot):
         noise_vec[33:45] = 0. # previous actions
         return noise_vec
 
+    def _get_phase(self):
+        cycle_time = self.cfg.rewards.cycle_time  # Период цикла шага (1.6 с)
+        phase = (self.episode_length_buf * self.dt / cycle_time) % 1.0  # Фаза цикла [0, 1] [num_envs]
+        return phase  # [num_envs]
+
+    def _get_gait_phase(self):
+        phase = self._get_phase()  # Фаза цикла [num_envs]
+        sin_pos = torch.sin(2 * torch.pi * phase)  # Синус фазы [-1, 1] [num_envs]
+        gait_mask = torch.zeros((self.num_envs, len(self.desired_contact_indices)), dtype=torch.bool, device=self.device)  # Маска: True - опора, False - полёт [num_envs, 2]
+        gait_mask[:, 0] = sin_pos >= 0  # RR в опоре при sin ≥ 0 (фаза [0, 0.5])
+        gait_mask[:, 1] = sin_pos < 0   # RL в опоре при sin < 0 (фаза [0.5, 1.0])
+        gait_mask[torch.abs(sin_pos) < self.cfg.rewards.bias] = True  # Двойная опора при |sin| < bias
+        return gait_mask  # [num_envs, 2]
+
     
     def _reward_tracking_pitch(self):
         # Tracking
@@ -91,11 +102,17 @@ class Go2(LeggedRobot):
         # return torch.exp(-error/self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
-        hip_names = ["FR_hip_joint", "FL_hip_joint","RR_hip_joint", "RL_hip_joint"]
+        hip_names = ["RR_hip_joint", "RL_hip_joint"]
         self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i, name in enumerate(hip_names):
             self.hip_indices[i] = self.dof_names.index(name)
-        return torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
+        error = torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
+        return torch.exp(-error / self.cfg.rewards.tracking_sigma)  # [num_envs]
+        # hip_names = ["RR_hip_joint", "RL_hip_joint"]
+        # self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
+        # for i, name in enumerate(hip_names):
+        #     self.hip_indices[i] = self.dof_names.index(name)
+        # return torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
     
     def _reward_feet_contact(self):
         contact = self.contact_forces[:, :, 2] > 50.0  # [num_envs, num_bodies]
@@ -105,16 +122,17 @@ class Go2(LeggedRobot):
         return 1.0 * desired_contact - 4.0 * undesired_contact + slip_penalty  # [num_envs]
     
     def _reward_base_height(self):
-        base_height = self.root_states[:, 2]
-        error = torch.square(base_height - self.cfg.rewards.base_height_target)
-        return torch.exp(-5 * error)
+                # Penalize base height away from target
+        base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
+        error = torch.square(base_height - 0.45)
+        return torch.exp(-2* error)
 
     def _reward_com_over_support(self):
         base_pos = self.body_state_buffer[:, self.base_index, 0:3]
         rr_pos = self.body_state_buffer[:, self.rr_foot_idx, 0:3]
         rl_pos = self.body_state_buffer[:, self.rl_foot_idx, 0:3]
         support_center = 0.5 * (rr_pos + rl_pos)
-        target_height = self.cfg.rewards.base_height_target
+        target_height = 0.42
         error = (0.4 * torch.square(base_pos[:, 0] - support_center[:, 0]) +
                 0.4 * torch.square(base_pos[:, 1] - support_center[:, 1]) +
                 0.8 * torch.square(base_pos[:, 2] - target_height))
@@ -122,17 +140,12 @@ class Go2(LeggedRobot):
     
 
     def _reward_rear_feet_contact_and_air(self):
-        # Contact reward for rear feet
         contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
-        contact_filt = torch.logical_or(contact, self.last_contacts[:, self.desired_contact_indices])  # [num_envs, 2]
+        contact_changes = torch.abs(contact.float() - self.last_contacts[:, self.desired_contact_indices].float())  # [num_envs, 2]
         self.last_contacts[:, self.desired_contact_indices] = contact
-        contact_reward = torch.sum(1.0 * contact_filt, dim=1)  # [num_envs]
-
-        # Air time reward for steps (dependent on commands)
-        first_contact = (self.feet_air_time[:, self.desired_contact_indices] > 0.) * contact_filt  # [num_envs, 2]
-        self.feet_air_time[:, self.desired_contact_indices] += self.dt
-        air_time_reward = torch.sum(0.3 * (self.feet_air_time[:, self.desired_contact_indices] - 0.5) * first_contact, dim=1)  # [num_envs]
-        air_time_reward *= torch.norm(self.commands[:, :2], dim=1) > 0.1  # [num_envs]
-        self.feet_air_time[:, self.desired_contact_indices] *= ~contact_filt
-
-        return contact_reward + 0.5 * air_time_reward  # [num_envs]
+        gait_mask = self._get_gait_phase()  # [num_envs, 2]
+        contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
+        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
+        contact_change_penalty = -1.0 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        undesired_contact_penalty = -10.0 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
+        return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
