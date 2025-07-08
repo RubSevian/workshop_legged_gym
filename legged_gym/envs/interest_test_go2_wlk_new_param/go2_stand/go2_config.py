@@ -4,11 +4,9 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 10
+        episode_length_s = 15
 
     class terrain(LeggedRobotCfg.terrain):
-        # mesh_type = 'plane'
-        # measure_heights = False
         mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
         horizontal_scale = 0.1# [m]
         vertical_scale = 0.001 # [m]
@@ -62,7 +60,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
         # decimation: Number of control action updates @ sim DT per policy DT
-        decimation = 4
+        decimation = 10
 
     class asset(LeggedRobotCfg.asset):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go2/urdf/go2.urdf'
@@ -73,12 +71,19 @@ class Go2RoughCfg(LeggedRobotCfg):
         flip_visual_attachments = True
         self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
 
-
+    class domain_rand(LeggedRobotCfg.domain_rand):
+        randomize_friction = True
+        friction_range = [0.4, 1.25]
+        randomize_base_mass = True
+        added_mass_range = [-0.05, 0.05]
+        push_robots = True
+        push_interval_s = 5
+        max_push_vel_xy = 0.25
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.75
-        base_height_target = 0.60 # Match init_state pos
-        cycle_time = 0.8
+        base_height_target = 0.56 # Match init_state pos
+        cycle_time = 1
         bias = 0.1
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2  # Disable for standing task
@@ -87,23 +92,23 @@ class Go2RoughCfg(LeggedRobotCfg):
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             tracking_pitch = 8 # Increased
-            rear_feet_contact_and_air = 5#4#1.5#1#1#3
-            hip_pos =1.5#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 0#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
-            feet_contact = 0##0.8#3.0  # Reduced to balance
+            rear_feet_contact_and_air = 6#4#1.5#1#1#3
+            hip_pos =1.25#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 0#0.05#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            feet_contact = 0#0.5##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -0.002
+            torques = -0.005
             dof_vel = 0#-0.00001
             dof_acc = -2.5e-6
             dof_pos_limits = 0#-5.0
             base_height =1.5#3#3 # Increased
-            collision = 0.#0.0001
-            termination = 0#10
+            collision = 0.01#0.0001
+            termination = -5#10
             dof_vel_limits = 0.0
             feet_stumble = 0#-0.0 
-            action_rate = -0.1
+            action_rate = -0.2
             stand_still = 0#-0.
-            feet_contact_forces = 0.001 #0.05
+            feet_contact_forces = 0.01 #0.05
 
             # tracking_lin_vel = 1.5
             # tracking_ang_vel = 1.5
@@ -135,17 +140,11 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
-            lin_vel_y = [-0.5, 0.5] # Небольшое боковое движение
+            lin_vel_x = [-1, 1]  # Поощряем движение вперёд
+            lin_vel_y = [-1, 1] # Небольшое боковое движение
             ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
 
-    class domain_rand(LeggedRobotCfg.domain_rand):
-        push_robots = True
-        push_interval_s = 5
-        max_push_vel_xy = 1.
-        randomize_base_mass = True
-        added_mass_range = [-1., 1.]
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     seed = 1
@@ -157,5 +156,5 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'go2_stand'
-        num_steps_per_env = 24 # per iteration
-        max_iterations = 10000
+        num_steps_per_env = 45
+        max_iterations = 5000

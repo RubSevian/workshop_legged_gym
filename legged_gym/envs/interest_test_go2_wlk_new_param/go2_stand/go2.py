@@ -93,7 +93,7 @@ class Go2(LeggedRobot):
         pitch_error = torch.abs(pitch - self.cfg.commands.pitch)  # [num_envs]
         roll_error = torch.abs(roll - self.cfg.commands.roll)  # [num_envs]
         total_error = pitch_error + roll_error  # [num_envs]
-        return torch.exp(-2 * total_error / self.cfg.rewards.tracking_sigma)
+        return torch.exp(-3 * total_error / self.cfg.rewards.tracking_sigma)
         # episode_time_buf = self.episode_length_buf * self.dt
         # pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
         # pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
@@ -122,10 +122,9 @@ class Go2(LeggedRobot):
         return 1.0 * desired_contact - 4.0 * undesired_contact + slip_penalty  # [num_envs]
     
     def _reward_base_height(self):
-                # Penalize base height away from target
-        base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        error = torch.square(base_height - self.cfg.rewards.base_height_target)
-        return torch.exp(-1* error)
+            base_height = self.root_states[:, 2]
+            error = torch.square(torch.clamp(base_height - self.cfg.rewards.base_height_target, -0.04, 0.04))
+            return torch.exp(-2 * error)
 
     def _reward_com_over_support(self):
         base_pos = self.body_state_buffer[:, self.base_index, 0:3]
@@ -145,7 +144,7 @@ class Go2(LeggedRobot):
         self.last_contacts[:, self.desired_contact_indices] = contact
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
+        swing_reward = torch.sum(1. * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
         contact_change_penalty = -1.25 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 25.0, dim=1)
+        undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 10.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 

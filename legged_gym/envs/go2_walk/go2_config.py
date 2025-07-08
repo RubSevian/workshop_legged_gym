@@ -10,7 +10,7 @@ class Go2_Walk_Cfg( LeggedRobotCfg ):
         measure_heights = False
     
     class init_state( LeggedRobotCfg.init_state ):
-        pos = [0.0, 0.0, 0.44] # x,y,z [m]
+        pos = [0.0, 0.0, 0.40] # x,y,z [m]
         default_joint_angles = { # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0.1,   # [rad]
             'RL_hip_joint': 0.1,   # [rad]
@@ -31,8 +31,8 @@ class Go2_Walk_Cfg( LeggedRobotCfg ):
     class control( LeggedRobotCfg.control ):
         # PD Drive parameters:
         control_type = 'P'
-        stiffness = {'joint': 60.}  # [N*m/rad]
-        damping = {'joint': 1.5}     # [N*m*s/rad]
+        stiffness = {'joint': 20.}  # [N*m/rad]
+        damping = {'joint': 1.}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
         # decimation: Number of control action updates @ sim DT per policy DT
@@ -61,29 +61,32 @@ class Go2_Walk_Cfg( LeggedRobotCfg ):
         roll = 0.
         standup_duration = 3.
         class ranges( LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [0.0, 0.0] # min max [m/s]
-            lin_vel_y = [0.0, 0.0]   # min max [m/s]
+            lin_vel_x = [-1.0, 1.0] # min max [m/s]
+            lin_vel_y = [-0.8, 0.8]   # min max [m/s]
             ang_vel_yaw = [0.0, 0.0]    # min max [rad/s]
             heading = [-3.14, 3.14]
             
     class rewards( LeggedRobotCfg.rewards ):
-        tracking_sigma = 0.75
+        # tracking_sigma = 0.25
         
         class scales( LeggedRobotCfg.rewards.scales ):
-            tracking_lin_vel = 0
-            tracking_ang_vel = 0
-            lin_vel_z = 0
-            ang_vel_xy = 0
-            feet_air_time = 0
-            tracking_pitch = 2.5  # Increased for stricter vertical torso
-            hip_pos = -1.0
+            tracking_lin_vel = 2
+            tracking_ang_vel = 1.5
+            lin_vel_z = -2.0
+            ang_vel_xy = -0.05
+            feet_air_time = 1.5
             feet_drag = 0
-            collision = -5.0  # Strong penalty for undesired contacts
-            feet_contact = 4.0  # Increased to strongly reward RL_foot, RR_foot contact
-            orientation = -0.5  # Increased to penalize non-vertical orientation
-            torques = -0.0002
-            dof_pos_limits = 0
-            base_height = -5.0 
+            collision = -0.02  # Strong penalty for undesired contacts
+            orientation = -0.2  # Increased to penalize non-vertical orientation
+            dof_pos_limits = -5
+            base_height = -1.5
+            action_rate = -0.01
+            torques = -0.00001
+            dof_vel = -0.
+            dof_acc = -2.5e-7
+            stumble = 0.0
+            stand_still = -0.01
+            feet_contact_forces = 0.0
             # tracking_lin_vel = 0.5
             # tracking_ang_vel = 0.5
             # lin_vel_z = 0
@@ -114,7 +117,7 @@ class Go2_Walk_Cfg( LeggedRobotCfg ):
         soft_dof_pos_limit = 0.9 # percentage of urdf limits, values above this limit are penalized
         soft_dof_vel_limit = 1.
         soft_torque_limit = 1.
-        base_height_target = 0.83
+        base_height_target = 0.40
         max_contact_force = 100. # forces above this value are penalized
         clearance_height_target = -0.50
 
