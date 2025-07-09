@@ -77,7 +77,7 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.75
-        base_height_target = 0.60 # Match init_state pos
+        base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.8
         bias = 0.1
         class scales(LeggedRobotCfg.rewards.scales):
@@ -92,16 +92,16 @@ class Go2RoughCfg(LeggedRobotCfg):
             com_over_support = 0#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -0.002
+            torques = -0.003
             dof_vel = 0#-0.00001
             dof_acc = -2.5e-6
             dof_pos_limits = 0#-5.0
             base_height =1.5#3#3 # Increased
-            collision = 0.#0.0001
+            collision = -0.5#0.0001
             termination = 0#10
             dof_vel_limits = 0.0
             feet_stumble = 0#-0.0 
-            action_rate = -0.1
+            action_rate = -0.15
             stand_still = 0#-0.
             feet_contact_forces = 0.001 #0.05
 
@@ -142,7 +142,7 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         push_robots = True
-        push_interval_s = 5
+        push_interval_s = 3
         max_push_vel_xy = 1.
         randomize_base_mass = True
         added_mass_range = [-1., 1.]
