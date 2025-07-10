@@ -93,7 +93,7 @@ class Go2(LeggedRobot):
         pitch_error = torch.abs(pitch - self.cfg.commands.pitch)  # [num_envs]
         roll_error = torch.abs(roll - self.cfg.commands.roll)  # [num_envs]
         total_error = pitch_error + roll_error  # [num_envs]
-        return torch.exp(-2 * total_error / self.cfg.rewards.tracking_sigma)
+        return torch.exp(-1 * total_error / self.cfg.rewards.tracking_sigma)
         # episode_time_buf = self.episode_length_buf * self.dt
         # pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
         # pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
@@ -146,6 +146,6 @@ class Go2(LeggedRobot):
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -1.25 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 25.0, dim=1)
+        contact_change_penalty = -1 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
