@@ -78,16 +78,16 @@ class Go2RoughCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.7
         base_height_target = 0.55 # Match init_state pos
-        cycle_time = 0.4
-        bias = 0.2
+        cycle_time = 0.3 #0.25
+        bias = 0.05#0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 2  # Disable for standing task
-            tracking_ang_vel = 1.5
+            tracking_lin_vel = 2.5  # Disable for standing task
+            tracking_ang_vel = 2
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 8 # Increased
-            rear_feet_contact_and_air = 5#4#1.5#1#1#3
+            tracking_pitch = 5 # Increased
+            rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos =2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
@@ -98,7 +98,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             dof_pos_limits = -5#-5.0
             base_height =1.5#3#3 # Increased
             collision = -0.5#0.0001
-            termination = -0.05#10
+            termination = -0.5#10
             dof_vel_limits = 0.0
             feet_stumble = -0.0 
             action_rate = -0.01
@@ -134,7 +134,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
+            lin_vel_x = [-0.75, 0.75]  # Поощряем движение вперёд
             lin_vel_y = [-0.5, 0.5] # Небольшое боковое движение
             ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
@@ -143,10 +143,10 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_friction = True
         friction_range = [0.2, 1.25]
         randomize_base_mass = True
-        added_mass_range = [-1., 1.]
+        added_mass_range = [-1.15, 1.15]
         push_robots = True
         push_interval_s = 1.5
-        max_push_vel_xy = 1.
+        max_push_vel_xy = 1.5
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     seed = 1
@@ -159,4 +159,4 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
         run_name = ''
         experiment_name = 'go2_stand'
         num_steps_per_env = 60 # per iteration
-        max_iterations = 5000
+        max_iterations = 10000
