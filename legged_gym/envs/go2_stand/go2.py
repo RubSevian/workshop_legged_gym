@@ -28,6 +28,13 @@ class Go2(LeggedRobot):
         self.last_contacts = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.bool, device=self.device)
         self.num_bodies = self.gym.get_actor_rigid_body_count(self.envs[0], self.actor_handles[0])
         self.feet_air_time = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.float, device=self.device)
+        self.last_last_actions = torch.zeros(
+            self.num_envs,
+            self.num_actions,
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
 
     def compute_observations(self):
         """ Computes observations
@@ -69,6 +76,10 @@ class Go2(LeggedRobot):
         noise_vec[33:45] = 0. # previous actions
         return noise_vec
 
+    def _post_physics_step(self):
+        super()._post_physics_step()
+        self.last_last_actions[:] = torch.clone(self.last_actions[:])
+        
     def _get_phase(self):
         cycle_time = self.cfg.rewards.cycle_time  # Период цикла шага (1.6 с)
         phase = (self.episode_length_buf * self.dt / cycle_time) % 1.0  # Фаза цикла [0, 1] [num_envs]
@@ -147,6 +158,16 @@ class Go2(LeggedRobot):
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -1 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
         undesired_contact_penalty = -5 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
+    
+
+    def _reward_smoothness(self):
+        term_1 = torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+        term_2 = torch.sum(
+            torch.square(self.actions + self.last_last_actions - 2 * self.last_actions),
+            dim=1,
+        )
+        term_3 = 0.05 * torch.sum(torch.abs(self.actions), dim=1)
+        return term_1 + term_2 + term_3
