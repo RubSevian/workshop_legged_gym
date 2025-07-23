@@ -36,7 +36,6 @@ class Go2(LeggedRobot):
             requires_grad=False,
         )
 
-
     def compute_observations(self):
         """ Computes observations
         """
@@ -80,7 +79,6 @@ class Go2(LeggedRobot):
     def _post_physics_step(self):
         super()._post_physics_step()
         self.last_last_actions[:] = torch.clone(self.last_actions[:])
-
         
     def _get_phase(self):
         cycle_time = self.cfg.rewards.cycle_time  # Период цикла шага (1.6 с)
@@ -135,11 +133,11 @@ class Go2(LeggedRobot):
         return 1.0 * desired_contact - 4.0 * undesired_contact + slip_penalty  # [num_envs]
     
     def _reward_base_height(self):
-        # Penalize base height
-        height_error = self.root_states[:, 2] - self.cfg.rewards.base_height_target
-        return torch.exp(-1* torch.square(height_error / self.cfg.rewards.tracking_sigma))
-
-
+                # Penalize base height away from target
+        base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
+        #print(f"BASE_HEIGHT{base_height}")
+        error = torch.square(base_height - self.cfg.rewards.base_height_target)
+        return torch.exp(-1* error)
 
     def _reward_com_over_support(self):
         base_pos = self.body_state_buffer[:, self.base_index, 0:3]
@@ -150,7 +148,7 @@ class Go2(LeggedRobot):
         error = (0.4 * torch.square(base_pos[:, 0] - support_center[:, 0]) +
                 0.4 * torch.square(base_pos[:, 1] - support_center[:, 1]) +
                 0.8 * torch.square(base_pos[:, 2] - target_height))
-        return torch.exp(-8.0 * error)
+        return torch.exp(-5.0 * error)
     
 
     def _reward_rear_feet_contact_and_air(self):
@@ -158,10 +156,10 @@ class Go2(LeggedRobot):
         contact_changes = torch.abs(contact.float() - self.last_contacts[:, self.desired_contact_indices].float())  # [num_envs, 2]
         self.last_contacts[:, self.desired_contact_indices] = contact
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
-        contact_reward = torch.sum(2.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        swing_reward = torch.sum(2.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -0.5 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -10 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
+        contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
+        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
+        contact_change_penalty = -1 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        undesired_contact_penalty = -6 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
     
 
@@ -175,13 +173,13 @@ class Go2(LeggedRobot):
         return 0.15*term_1 + 0.1*term_2 + term_3
     
 
-    # def _negsqrd_exp(self, x, a=1):
-    #     """shorthand helper for negative squared exponential e^(-(x/a)^2)
-    #     a: range of x
-    #     """
-    #     return torch.exp(-torch.square(x / a) / 0.25)
+    def _negsqrd_exp(self, x, a=1):
+        """shorthand helper for negative squared exponential e^(-(x/a)^2)
+        a: range of x
+        """
+        return torch.exp(-torch.square(x / a) / 0.25)
 
-    # def _reward_tracking_lin_vel(self):
-    #     error = self.commands[:, :2] - self.base_lin_vel[:, :2]
-    #     error *= 1.0 / (1.0 + torch.abs(self.commands[:, :2]))
-    #     return self._negsqrd_exp(error, a=1).sum(dim=1)
+    def _reward_tracking_lin_vel(self):
+        error = self.commands[:, :2] - self.base_lin_vel[:, :2]
+        error *= 1.0 / (1.0 + torch.abs(self.commands[:, :2]))
+        return self._negsqrd_exp(error, a=1).sum(dim=1)

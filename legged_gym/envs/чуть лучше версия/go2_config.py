@@ -39,7 +39,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         success_threshold = 0.8  # Строгий порог успеха
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.35]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.40]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0,  # [rad]
             'RL_hip_joint': 0,  # [rad]
@@ -91,21 +91,21 @@ class Go2RoughCfg(LeggedRobotCfg):
             feet_air_time = 0#1.5
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=1#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 3#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            hip_pos=1#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 3#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -5e-4
-            dof_vel = -5e-6
+            torques = -5e-6
+            dof_vel = -5e-4
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -5#-5.0
-            base_height =2#3#3 # Increased
+            base_height =1.5#3#3 # Increased
             collision = -0.5#0.0001
             termination = -0.5#10
-            dof_vel_limits = -5
+            dof_vel_limits = -10
             feet_stumble = -0.0 
             action_rate = 0#-0.01
-            smoothness = -0.01
+            smoothness = -0.015
             stand_still = -0.
 
             # tracking_lin_vel = 1.5
@@ -150,7 +150,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_base_mass = True
         added_mass_range = [-1.15, 1.15]
         push_robots = True
-        push_interval_s = 2
+        push_interval_s = 5
         max_push_vel_xy = 1.
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
