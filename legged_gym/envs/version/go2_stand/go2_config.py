@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 20
+        episode_length_s = 25
 
     class terrain(LeggedRobotCfg.terrain):
         # mesh_type = 'plane'
@@ -39,7 +39,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         success_threshold = 0.8  # Строгий порог успеха
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.40]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.42]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0,  # [rad]
             'RL_hip_joint': 0,  # [rad]
@@ -80,32 +80,32 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.7
-        base_height_target = 0.55 # Match init_state pos
-        cycle_time = 0.3 #0.25
-        bias = 0.1#0.1
+        base_height_target = 0.60 # Match init_state pos
+        cycle_time = 0.25 #0.25
+        bias = 0.05#0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 3 # Disable for standing task
-            tracking_ang_vel = 2
+            tracking_lin_vel = 2 # Disable for standing task
+            tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=1.5#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            hip_pos=1#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 1#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -5e-6
-            dof_vel = -5e-4
+            torques = -5e-4
+            dof_vel = -5e-6
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -5#-5.0
-            base_height =1.5#3#3 # Increased
+            base_height =2#3#3 # Increased
             collision = -0.5#0.0001
             termination = -0.5#10
-            dof_vel_limits = -10
+            dof_vel_limits = -5
             feet_stumble = -0.0 
             action_rate = 0#-0.01
-            smoothness = -0.015
+            smoothness = -0.01
             stand_still = -0.
 
             # tracking_lin_vel = 1.5
@@ -130,9 +130,9 @@ class Go2RoughCfg(LeggedRobotCfg):
             # feet_contact_forces = 0.00005
 
     class commands(LeggedRobotCfg.commands):
-        pitch = -1.57
+        pitch = -1.5708
         roll = 0.
-        standup_duration = 1.25
+        standup_duration = 1
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
@@ -148,9 +148,9 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_friction = True
         friction_range = [0.5, 1.25]
         randomize_base_mass = True
-        added_mass_range = [-3, 3]
+        added_mass_range = [-2.5, 2.5]
         push_robots = True
-        push_interval_s = 2
+        push_interval_s = 5
         max_push_vel_xy = 1.
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
