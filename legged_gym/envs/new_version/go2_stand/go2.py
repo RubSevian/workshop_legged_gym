@@ -32,7 +32,7 @@ class Go2(LeggedRobot):
         self.undesired_contact_indices = torch.tensor([self.fl_foot_idx, self.fr_foot_idx, self.rr_thigh_idx, self.rl_thigh_idx, self.fl_thigh_idx, self.fr_thigh_idx, self.rr_calf_idx, self.rl_calf_idx, self.fl_calf_idx, self.fr_calf_idx], dtype=torch.long, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.bool, device=self.device)
         self.num_bodies = self.gym.get_actor_rigid_body_count(self.envs[0], self.actor_handles[0])
-        self.feet_air_time = torch.zeros(self.num_envs, len(self.desired_contact_indices), dtype=torch.float, device=self.device)
+        self.feet_air_time = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.float, device=self.device)
 
     def compute_observations(self):
         """ Computes observations
@@ -176,16 +176,16 @@ class Go2(LeggedRobot):
         match_reward = torch.sum((contact == gait_mask).float(), dim=1)*2
 
         # Поощрение swing (ноги в воздухе, когда нужно)
-        swing_reward = torch.sum((~contact & ~gait_mask).float(), dim=1) * 1.0
+        swing_reward = torch.sum((~contact & ~gait_mask).float(), dim=1) * 2
 
         # Штраф за слишком частые переключения (анти-дребезг)
         contact_changes = torch.abs(contact.float() - self.last_contacts[:, self.desired_contact_indices].float())
         self.last_contacts[:, self.desired_contact_indices] = contact
-        change_penalty = -0.9 * torch.sum(contact_changes, dim=1)
+        change_penalty = -0.05 * torch.sum(contact_changes, dim=1)
 
         # Штраф за передние лапы и нежелательные контакты
         undesired = torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
-        undesired_penalty = -5 * undesired
+        undesired_penalty = -8 * undesired
 
         return match_reward + swing_reward + change_penalty + undesired_penalty
     
@@ -197,7 +197,7 @@ class Go2(LeggedRobot):
             dim=1,
         )
         term_3 = 0.015 * torch.sum(torch.abs(self.actions), dim=1)
-        return 0.15*term_1 + 0.1*term_2 + term_3
+        return 0.1*term_1 + 0.1*term_2 + term_3
     
     def _reward_feet_air_time(self):
         # Поощряем время в воздухе для задних лап (RR, RL)
@@ -209,7 +209,7 @@ class Go2(LeggedRobot):
         rew_airTime = torch.sum((self.feet_air_time - 0.5) * first_contact, dim=1)
         rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1
         self.feet_air_time *= ~contact_filt
-        # print(f"FeetAirTime: reward={rew_airTime.mean()}, air_time={self.feet_air_time.mean()}")
+        print(f"FeetAirTime: reward={rew_airTime.mean()}, air_time={self.feet_air_time.mean()}")
         return rew_airTime
     # def _negsqrd_exp(self, x, a=1):
     #     """shorthand helper for negative squared exponential e^(-(x/a)^2)

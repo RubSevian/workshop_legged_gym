@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 25
+        episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
         # mesh_type = 'plane'
@@ -84,22 +84,22 @@ class Go2RoughCfg(LeggedRobotCfg):
         cycle_time = 0.25 #0.25
         bias = 0.1#0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 2.5 # Disable for standing task
+            tracking_lin_vel = 3 # Disable for standing task
             tracking_ang_vel = 2
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 6 # Increased
+            tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=1#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 1#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            hip_pos=1.5#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
             torques = -5e-6
             dof_vel = -5e-4
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -5#-5.0
-            base_height =0#3#3 # Increased
+            base_height =1.5#3#3 # Increased
             collision = -0.5#0.0001
             termination = -0.5#10
             dof_vel_limits = -10
