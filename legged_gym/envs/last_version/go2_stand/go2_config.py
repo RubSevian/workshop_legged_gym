@@ -7,9 +7,36 @@ class Go2RoughCfg(LeggedRobotCfg):
         episode_length_s = 25
 
     class terrain(LeggedRobotCfg.terrain):
-        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
-        
-        
+        # mesh_type = 'plane'
+        # measure_heights = False
+        mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
+        horizontal_scale = 0.1# [m]
+        vertical_scale = 0.001 # [m]
+        border_size = 25 # [m]
+        curriculum = True
+        static_friction = 0.8
+        dynamic_friction = 0.6
+        restitution = 0.
+        # rough terrain only:
+        measure_heights = True
+        measured_points_x = [-0.20, -0.15, 0., 0.15, 0.20]
+        measured_points_y = [-0.15, 0., 0.15]
+        # measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
+        # measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
+        selected = False # select a unique terrain type and pass all arguments
+        terrain_kwargs = None # Dict of arguments for selected terrain
+        max_init_terrain_level = 1 # starting curriculum state
+        terrain_length = 8.
+        terrain_width = 8.
+        num_rows= 10 # number of terrain rows (levels)
+        num_cols = 20 # number of terrain cols (types)
+        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+        terrain_proportions = [0.5,0.5]
+        # trimesh only:
+        slope_treshold = 0 # slopes above this threshold will be corrected to vertical surfaces
+        max_height = 0.03  # Ограничение высоты неровностей
+        curriculum_step = 0.2  # Плавное усложнение
+        success_threshold = 0.8  # Строгий порог успеха
 
     class init_state(LeggedRobotCfg.init_state):
         pos = [0.0, 0.0, 0.40]  # x,y,z [m]
@@ -54,28 +81,27 @@ class Go2RoughCfg(LeggedRobotCfg):
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.7
         base_height_target = 0.55 # Match init_state pos
-        cycle_time = 0.3 #0.25
+        cycle_time = 0.25 #0.25
         bias = 0.1#0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 2 # Disable for standing task
-            tracking_ang_vel = 1.5
+            tracking_lin_vel = 2.5 # Disable for standing task
+            tracking_ang_vel = 2
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            tracking_pitch = 5 # Increased
-            rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=2#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
-            feet_contact = 0##0.8#3.0  # Reduced to balance
+            tracking_pitch = 7 # Increased
+            rear_feet_contact_and_air = 5#4#1.5#1#1#3
+            hip_pos=0.5#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            com_over_support = 1#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             orientation = 0.0
-            torques = -5e-4
-            dof_vel = -5e-6
+            torques = -5e-5
+            dof_vel = -5e-4
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -5#-5.0
-            base_height =2#3#3 # Increased
+            base_height =1.5#3#3 # Increased
             collision = -0.5#0.0001
-            termination = -10#10
-            dof_vel_limits = -5
+            termination = -0.5#10
+            dof_vel_limits = -10
             feet_stumble = -0.0 
             action_rate = 0#-0.01
             smoothness = -0.015
@@ -105,7 +131,7 @@ class Go2RoughCfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
         roll = 0.
-        standup_duration = 1
+        standup_duration = 1.25
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
