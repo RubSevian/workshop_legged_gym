@@ -120,7 +120,7 @@ class Go2(LeggedRobot):
         pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
         pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
         error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
-        return torch.exp(-error/self.cfg.rewards.tracking_sigma)
+        return torch.exp(-1*error/self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
         hip_names = ["FR_hip_joint", "FL_hip_joint","RR_hip_joint", "RL_hip_joint"]
@@ -167,9 +167,9 @@ class Go2(LeggedRobot):
         self.last_contacts[:, self.desired_contact_indices] = contact
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(2.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        swing_reward = torch.sum(2.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -0.5 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -2 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
+        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
+        contact_change_penalty = -1. * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        undesired_contact_penalty = -10 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 20.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
     
 
@@ -179,10 +179,40 @@ class Go2(LeggedRobot):
             torch.square(self.actions + self.last_last_actions - 2 * self.last_actions),
             dim=1,
         )
-        term_3 = 0.015 * torch.sum(torch.abs(self.actions), dim=1)
-        return 0.15*term_1 + 0.1*term_2 + term_3
+        term_3 = 0.5 * torch.sum(torch.abs(self.actions), dim=1)
+        return 0.2*term_1 + 0.15*term_2 + term_3
     
+    def _reward_low_speed(self):
+        """
+        Rewards or penalizes the robot based on its speed relative to the commanded speed. 
+        This function checks if the robot is moving too slow, too fast, or at the desired speed, 
+        and if the movement direction matches the command.
+        """
+        # Calculate the absolute value of speed and command for comparison
+        absolute_speed = torch.abs(self.base_lin_vel[:, 0])
+        absolute_command = torch.abs(self.commands[:, 0])
 
+        # Define speed criteria for desired range
+        speed_too_low = absolute_speed < 0.5 * absolute_command
+        speed_too_high = absolute_speed > 1.2 * absolute_command
+        speed_desired = ~(speed_too_low | speed_too_high)
+
+        # Check if the speed and command directions are mismatched
+        sign_mismatch = torch.sign(
+            self.base_lin_vel[:, 0]) != torch.sign(self.commands[:, 0])
+
+        # Initialize reward tensor
+        reward = torch.zeros_like(self.base_lin_vel[:, 0])
+        # Assign rewards based on conditions
+        # Speed too low
+        reward[speed_too_low] = -1.0
+        # Speed too high
+        reward[speed_too_high] = 0.
+        # Speed within desired range
+        reward[speed_desired] = 1.2
+        # Sign mismatch has the highest priority
+        reward[sign_mismatch] = -2.0
+        return reward * (self.commands[:, 0].abs() > self.cfg.rewards.command_dead)
     # def _negsqrd_exp(self, x, a=1):
     #     """shorthand helper for negative squared exponential e^(-(x/a)^2)
     #     a: range of x

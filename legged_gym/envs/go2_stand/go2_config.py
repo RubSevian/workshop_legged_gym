@@ -4,15 +4,43 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 25
+        episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
-        
+        # mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
+        # horizontal_scale = 0.1# [m]
+        # vertical_scale = 0.001 # [m]
+        # border_size = 25 # [m]
+        # curriculum = False
+        # static_friction = 0.8
+        # dynamic_friction = 0.6
+        # restitution = 0.
+        # # rough terrain only:
+        # measure_heights = False
+        # measured_points_x = [-0.20, -0.15, 0., 0.15, 0.20]
+        # measured_points_y = [-0.15, 0., 0.15]
+        # # measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
+        # # measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
+        # selected = False # select a unique terrain type and pass all arguments
+        # terrain_kwargs = None # Dict of arguments for selected terrain
+        # max_init_terrain_level = 1 # starting curriculum state
+        # terrain_length = 8.
+        # terrain_width = 8.
+        # num_rows= 10 # number of terrain rows (levels)
+        # num_cols = 20 # number of terrain cols (types)
+        # # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+        # terrain_proportions = [0,1,0,0,0]
+        # # trimesh only:
+        # slope_treshold = 0 # slopes above this threshold will be corrected to vertical surfaces
+        # max_height = 0.05  # Ограничение высоты неровностей
+        # curriculum_step = 0.02  # Плавное усложнение
+        # success_threshold = 0.8  # Строгий порог успеха
+
         
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.40]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.35]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0,  # [rad]
             'RL_hip_joint': 0,  # [rad]
@@ -53,15 +81,17 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.7
-        base_height_target = 0.55 # Match init_state pos
+        base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.3 #0.25
-        bias = 0.1#0.1
+        bias = 0.25#0.1
+        command_dead =0.005
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2 # Disable for standing task
             tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
+            low_speed = 0.5
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos=2#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
@@ -71,14 +101,14 @@ class Go2RoughCfg(LeggedRobotCfg):
             torques = -5e-4
             dof_vel = -5e-6
             dof_acc = -2.5e-6 #es2432
-            dof_pos_limits = -5#-5.0
+            dof_pos_limits = -10#-5.0
             base_height =2#3#3 # Increased
             collision = -0.5#0.0001
             termination = -10#10
-            dof_vel_limits = -5
+            dof_vel_limits = -10
             feet_stumble = -0.0 
             action_rate = 0#-0.01
-            smoothness = -0.015
+            smoothness = -0.02
             stand_still = -0.
 
             # tracking_lin_vel = 1.5
@@ -112,14 +142,14 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.75, 0.75]  # Поощряем движение вперёд
+            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
             lin_vel_y = [-0.5, 0.5] # Небольшое боковое движение
             ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
-        friction_range = [0.5, 1.25]
+        friction_range = [0.8, 1.25]
         randomize_base_mass = True
         added_mass_range = [-3, 3]
         push_robots = True
