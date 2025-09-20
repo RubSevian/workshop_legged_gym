@@ -75,26 +75,30 @@ class Go2RoughCfg(LeggedRobotCfg):
         penalize_contacts_on = ["thigh", "calf", "base"]
         terminate_after_contacts_on = ["base"]
         flip_visual_attachments = True
+        fix_base_link = False
         self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
 
-
+    class sim(LeggedRobotCfg.sim):
+        dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.7
         base_height_target = 0.6 # Match init_state pos
-        cycle_time = 0.3 #0.25
-        bias = 0.25#0.1
-        command_dead =0.005
+        cycle_time = 0.25 #0.25
+        bias = 0.2#0.1
+        command_dead =0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 2 # Disable for standing task
-            tracking_ang_vel = 1.5
+            tracking_lin_vel = 1.5# Disable for standing task
+            tracking_ang_vel = 1
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            low_speed = 0.5
+            feet_air_time_2 = 0#1.5
+            low_speed = 0.005
+            joint_pos =2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=2#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
@@ -102,35 +106,14 @@ class Go2RoughCfg(LeggedRobotCfg):
             dof_vel = -5e-6
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -10#-5.0
-            base_height =2#3#3 # Increased
+            base_height =3#3#3 # Increased
             collision = -0.5#0.0001
             termination = -10#10
             dof_vel_limits = -10
             feet_stumble = -0.0 
             action_rate = 0#-0.01
-            smoothness = -0.02
+            smoothness = -0.01
             stand_still = -0.
-
-            # tracking_lin_vel = 1.5
-            # tracking_ang_vel = 1.5
-            # lin_vel_z = 0.0
-            # ang_vel_xy = 0.0
-            # feet_air_time = 0.0
-            # tracking_pitch = 7.0
-            # rear_feet_contact_and_air = 5.0
-            # hip_pos = 3.0
-            # com_over_support = 3.0
-            # base_height = 5.0
-            # orientation = 0.0
-            # torques = -0.0002
-            # dof_vel = -0.00001
-            # dof_acc = -2.5e-7
-            # dof_pos_limits = -10.0
-            # collision = 0.01
-            # termination = 0.0
-            # action_rate = -0.01
-            # stand_still = 0.0
-            # feet_contact_forces = 0.00005
 
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
@@ -142,26 +125,28 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
-            lin_vel_y = [-0.5, 0.5] # Небольшое боковое движение
+            lin_vel_x = [-0.25, 0.25]  # Поощряем движение вперёд
+            lin_vel_y = [-0.25, 0.25] # Небольшое боковое движение
             ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
-        friction_range = [0.8, 1.25]
+        friction_range = [0.7, 1.25]
         randomize_base_mass = True
-        added_mass_range = [-3, 3]
+        added_mass_range = [-2, 2]
         push_robots = True
-        push_interval_s = 2
+        push_interval_s = 5
         max_push_vel_xy = 1.
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
-    seed = 1
+    seed = 5
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
     class policy(LeggedRobotCfgPPO.policy):
         init_noise_std = 1
+        actor_hidden_dims = [512, 256, 128]
+        critic_hidden_dims = [768, 256, 128]
         
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
