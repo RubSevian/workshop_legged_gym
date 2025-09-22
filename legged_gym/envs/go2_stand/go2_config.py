@@ -94,7 +94,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             feet_air_time_2 = 0#1.5
-            low_speed = 0.05
+            low_speed = 0.005
             joint_pos =2
             foot_slip = 2
             tracking_pitch = 5 # Increased
