@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 25
+        episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
