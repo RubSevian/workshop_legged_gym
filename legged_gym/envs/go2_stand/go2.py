@@ -104,6 +104,7 @@ class Go2(LeggedRobot):
     def post_physics_step(self):
         super().post_physics_step()
         self.last_last_actions[:] = torch.clone(self.last_actions[:])
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
         swing_mask = 1 - self._get_gait_phase().float()
         self.swing_mask = swing_mask * (1 - self.standing_command_mask.unsqueeze(1))
         self.stance_mask = 1 - self.swing_mask
@@ -118,6 +119,7 @@ class Go2(LeggedRobot):
     def _init_buffers(self):
         super()._init_buffers()
         rigid_body_state = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        self.gym.refresh_rigid_body_state_tensor(self.sim)
         self.rigid_body_state = gymtorch.wrap_tensor(rigid_body_state)[
             : self.num_envs * self.num_bodies, :
         ]
@@ -228,7 +230,7 @@ class Go2(LeggedRobot):
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -1. * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
+        contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
         undesired_contact_penalty = -10 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 1.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
     
@@ -309,6 +311,23 @@ class Go2(LeggedRobot):
         # print(f"FeetAirTime2: reward={rew_airTime.mean()}, air_time={self.feet_air_time.mean()}")
         return rew_airTime
     
+    def _reward_foot_slip(self):
+        """
+        Calculates the reward for minimizing foot slip. The reward is based on the contact forces
+        and the speed of the feet. A contact threshold is used to determine if the foot is in contact
+        with the ground. The speed of the foot is calculated and scaled by the contact condition.
+        """
+        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 5.0
+        # print(f"Contact{contact}")
+        # print(f"rigid_body_state {self.rigid_body_state }")
+        foot_speed_norm = torch.norm(self.rigid_state[:, self.desired_contact_indices, 7:9], dim=2)
+        # print(f"foot_speed_norm{foot_speed_norm}")
+        rew = -torch.sqrt(foot_speed_norm)
+        # print(f"rew{rew}")
+        rew *= contact
+        # print(f"rew* {torch.sum(rew, dim=1)}")
+        #print(f"Reward for feet slip (env 0): {rew}")
+        return torch.sum(rew, dim=1)
 
     # def _reward_tracking_lin_vel(self):
     #     """

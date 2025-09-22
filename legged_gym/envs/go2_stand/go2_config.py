@@ -4,7 +4,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
-        episode_length_s = 20
+        episode_length_s = 25
 
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
@@ -88,14 +88,15 @@ class Go2RoughCfg(LeggedRobotCfg):
         bias = 0.2#0.1
         command_dead =0.1
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 1.5# Disable for standing task
-            tracking_ang_vel = 1
+            tracking_lin_vel = 2.5# Disable for standing task
+            tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             feet_air_time_2 = 0#1.5
-            low_speed = 0.005
+            low_speed = 0.05
             joint_pos =2
+            foot_slip = 2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
@@ -118,7 +119,7 @@ class Go2RoughCfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
         roll = 0.
-        standup_duration = 1
+        standup_duration = 1.25
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
