@@ -13,8 +13,8 @@ class Go2RoughCfg(LeggedRobotCfg):
         # vertical_scale = 0.001 # [m]
         # border_size = 25 # [m]
         # curriculum = False
-        # static_friction = 0.8
-        # dynamic_friction = 0.6
+        # static_friction = 0.9
+        # dynamic_friction = 0.8
         # restitution = 0.
         # # rough terrain only:
         # measure_heights = False
@@ -82,29 +82,34 @@ class Go2RoughCfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
-        tracking_sigma = 0.7
+        tracking_sigma = 0.5
         base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.25 #0.25
         bias = 0.2#0.1
         command_dead =0.1
+        min_dist = 0.26
+        max_dist = 0.29
+        soft_dof_pos_limit = 0.98
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 2.5# Disable for standing task
+            tracking_lin_vel = 1.5# Disable for standing task
             tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             feet_air_time_2 = 0#1.5
-            low_speed = 0.005
-            joint_pos =2
-            foot_slip = 2
+            low_speed = 0.25
+            joint_pos =1
+            foot_slip = -2
+            feet_contact_number = 0#0.5
+            feet_distance = 0.25#2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -5e-4
-            dof_vel = -5e-6
+            torques = -5e-5
+            dof_vel = -5e-4
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -10#-5.0
             base_height =3#3#3 # Increased
@@ -123,12 +128,12 @@ class Go2RoughCfg(LeggedRobotCfg):
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 10. # time before command are changed[s]
+        resampling_time = 5. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.25, 0.25]  # Поощряем движение вперёд
-            lin_vel_y = [-0.25, 0.25] # Небольшое боковое движение
-            ang_vel_yaw = [0.0, 0.0]
+            lin_vel_x = [-0.4, 0.4]  # Поощряем движение вперёд
+            lin_vel_y = [-0.2, 0.2] # Небольшое боковое движение
+            ang_vel_yaw = [-0.3, 0.3]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
