@@ -252,8 +252,8 @@ class Go2_Walk(LeggedRobot):
             torch.square(self.actions + self.last_last_actions - 2 * self.last_actions),
             dim=1,
         )
-        term_3 = 0.05 * torch.sum(torch.abs(self.actions), dim=1)
-        return 0.5*term_1 + 0.4*term_2 + term_3
+        term_3 = 0.015 * torch.sum(torch.abs(self.actions), dim=1)
+        return 0.15*term_1 + 0.1*term_2 + term_3
     
     def _reward_low_speed(self):
         """

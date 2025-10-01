@@ -1,7 +1,7 @@
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobotCfgPPO
 
 
-class Go2RoughCfg(LeggedRobotCfg):
+class Go2_Walk_Cfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
         num_observations = 45
         episode_length_s = 20
@@ -61,7 +61,7 @@ class Go2RoughCfg(LeggedRobotCfg):
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
         control_type = 'P'
-        stiffness = {'joint': 25.}  # [N*m/rad]
+        stiffness = {'joint': 30.}  # [N*m/rad]
         damping = {'joint': 1.5}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
@@ -74,6 +74,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         foot_name = "foot"
         penalize_contacts_on = ["thigh", "calf", "base"]
         terminate_after_contacts_on = ["base"]
+        feet_name_reward=['RL_foot', 'RR_foot']
         contact_foot=['RL_foot', 'RR_foot']
         flip_visual_attachments = True
         fix_base_link = False
@@ -83,7 +84,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
-        tracking_sigma = 0.5
+        tracking_sigma = 0.25
         base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.25 #0.25
         bias = 0.2#0.1
@@ -97,7 +98,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            feet_air_time_2 = 0#1.5
+            feet_air_time_2 = 0.4#1.5
             low_speed = 0.25
             joint_pos =1
             foot_slip = -2
@@ -109,7 +110,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -5e-5
+            torques = -5e-4
             dof_vel = -5e-4
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -10#-5.0
@@ -133,7 +134,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
             lin_vel_x = [-0.4, 0.4]  # Поощряем движение вперёд
-            lin_vel_y = [-0.2, 0.2] # Небольшое боковое движение
+            lin_vel_y = [-0.1, 0.1] # Небольшое боковое движение
             ang_vel_yaw = [-0.3, 0.3]
             heading = [-3.14, 3.14]
 
@@ -143,13 +144,14 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_base_mass = True
         added_base_mass_range = [-1,1]
         push_robots = True
-        push_interval_s = 5
-        max_push_vel_xy = 1.
+        push_interval_s = 4
+        max_push_vel_xy = 0.5
+        max_push_ang_vel = 0.5
         randomize_link_mass = True
         multiplied_link_mass_range = [0.9, 1.1]
 
         randomize_base_com = True
-        added_base_com_range = [-0.02, 0.02]
+        added_base_com_range = [-0.03, 0.03]
         randomize_pd_gains = True
         stiffness_multiplier_range = [0.9, 1.1]  
         damping_multiplier_range = [0.9, 1.1]    
@@ -158,7 +160,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         randomize_motor_zero_offset = True
         motor_zero_offset_range = [-0.035, 0.035] # Offset to add to the motor angles
 
-class Go2RoughCfgPPO(LeggedRobotCfgPPO):
+class Go2_Walk_CfgPPO(LeggedRobotCfgPPO):
     seed = 5
     class algorithm(LeggedRobotCfgPPO.algorithm):
         entropy_coef = 0.01
@@ -169,6 +171,6 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
         
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
-        experiment_name = 'go2_stand'
+        experiment_name = 'go2_walk'
         num_steps_per_env = 60 # per iteration
         max_iterations = 10000
