@@ -155,7 +155,7 @@ class Go2_Walk(LeggedRobot):
     def _get_gait_phase(self):
         phase = self._get_phase()  # Фаза цикла [num_envs]
         sin_pos = torch.sin(2 * torch.pi * phase)  # Синус фазы [-1, 1] [num_envs]
-        gait_mask = torch.zeros((self.num_envs, len(self.desired_contact_indices)), dtype=torch.bool, device=self.device)  # Маска: True - опора, False - полёт [num_envs, 2]
+        gait_mask = torch.zeros((self.num_envs, len(self.feet_name_reward_indices)), dtype=torch.bool, device=self.device)  # Маска: True - опора, False - полёт [num_envs, 2]
         gait_mask[:, 0] = sin_pos >= 0  # RR в опоре при sin ≥ 0 (фаза [0, 0.5])
         gait_mask[:, 1] = sin_pos < 0   # RL в опоре при sin < 0 (фаза [0.5, 1.0])
         gait_mask[torch.abs(sin_pos) < self.cfg.rewards.bias] = 1 # Двойная опора при |sin| < bias
@@ -231,7 +231,7 @@ class Go2_Walk(LeggedRobot):
     
 
     def _reward_rear_feet_contact_and_air(self):
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
+        contact = self.contact_forces[:, self.feet_name_reward_indices, 2] > 50.0  # [num_envs, 2]
         contact_changes = torch.abs(contact.float() - self.last_contacts.float())  # [num_envs, 2]
         self.last_contacts = contact
         # print(f"contact {contact}")
@@ -252,8 +252,8 @@ class Go2_Walk(LeggedRobot):
             torch.square(self.actions + self.last_last_actions - 2 * self.last_actions),
             dim=1,
         )
-        term_3 = 0.05 * torch.sum(torch.abs(self.actions), dim=1)
-        return 0.5*term_1 + 0.4*term_2 + term_3
+        term_3 = 0.015 * torch.sum(torch.abs(self.actions), dim=1)
+        return 0.15*term_1 + 0.15*term_2 + term_3
     
     def _reward_low_speed(self):
         """
@@ -315,10 +315,10 @@ class Go2_Walk(LeggedRobot):
         and the speed of the feet. A contact threshold is used to determine if the foot is in contact
         with the ground. The speed of the foot is calculated and scaled by the contact condition.
         """
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 5.0
+        contact = self.contact_forces[:, self.feet_name_reward_indices, 2] > 5.0
         # print(f"Contact{contact}")
         # print(f"rigid_body_state {self.rigid_body_state }")
-        foot_speed_norm = torch.norm(self.rigid_state[:, self.desired_contact_indices, 7:9], dim=2)
+        foot_speed_norm = torch.norm(self.rigid_state[:, self.feet_name_reward_indices, 7:9], dim=2)
         # print(f"foot_speed_norm{foot_speed_norm}")
         rew = torch.sqrt(foot_speed_norm)
         # print(f"rew{rew}")
@@ -331,7 +331,7 @@ class Go2_Walk(LeggedRobot):
         """
         Calculates the reward based on the distance between the feet. Penilize feet get close to each other or too far away.
         """
-        foot_pos = self.rigid_state[:, self.desired_contact_indices, :2]
+        foot_pos = self.rigid_state[:, self.feet_name_reward_indices, :2]
         foot_dist = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=1)
         fd = self.cfg.rewards.min_dist
         max_df = self.cfg.rewards.max_dist
@@ -363,7 +363,7 @@ class Go2_Walk(LeggedRobot):
     #     return rew_pos
     
     def _reward_feet_contact_number(self):
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 1.0
+        contact = self.contact_forces[:, self.feet_name_reward_indices, 2] > 1.0
         stance_mask = self._get_gait_phase()
         reward = torch.where(contact == stance_mask, 1.0, -50.0)
         return torch.mean(reward, dim=1)

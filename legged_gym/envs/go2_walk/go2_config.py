@@ -61,7 +61,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
     class control(LeggedRobotCfg.control):
         # PD Drive parameters:
         control_type = 'P'
-        stiffness = {'joint': 30.}  # [N*m/rad]
+        stiffness = {'joint': 25.}  # [N*m/rad]
         damping = {'joint': 1.5}     # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
@@ -72,7 +72,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         file = '{LEGGED_GYM_ROOT_DIR}/resources/robots/go2/urdf/go2.urdf'
         name = "go2"
         foot_name = "foot"
-        penalize_contacts_on = ["thigh", "calf", "base"]
+        penalize_contacts_on = ["thigh", "calf","base"]
         terminate_after_contacts_on = ["base"]
         feet_name_reward=['RL_foot', 'RR_foot']
         contact_foot=['RL_foot', 'RR_foot']
@@ -92,6 +92,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         min_dist = 0.26
         max_dist = 0.29
         soft_dof_pos_limit = 0.98
+        only_positive_rewards = True
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 1.5# Disable for standing task
             tracking_ang_vel = 1.5
@@ -103,7 +104,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
             joint_pos =1
             foot_slip = -2
             feet_contact_number = 0#0.5
-            feet_distance = 0.25#2
+            feet_distance = 0.25#0.1#2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
@@ -140,7 +141,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
-        friction_range = [0.7, 1.25]
+        friction_range = [0.7, 1.15]
         randomize_base_mass = True
         added_base_mass_range = [-1,1]
         push_robots = True
