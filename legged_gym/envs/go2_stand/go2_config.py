@@ -84,7 +84,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
-        tracking_sigma = 0.7
+        tracking_sigma = 0.5
         base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.25 #0.25
         bias = 0.2#0.1
@@ -140,7 +140,8 @@ class Go2RoughCfg(LeggedRobotCfg):
         added_base_mass_range = [-2,2]
         push_robots = True
         push_interval_s = 5
-        max_push_vel_xy = 1.
+        max_push_vel_xy = 0.5
+        max_push_ang_vel = 0.25
         randomize_link_mass = True
         multiplied_link_mass_range = [0.9, 1.1]
 
