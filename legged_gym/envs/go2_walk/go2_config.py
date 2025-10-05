@@ -84,29 +84,31 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
-        tracking_sigma = 0.5
+        tracking_sigma = 0.7
         base_height_target = 0.6 # Match init_state pos
-        cycle_time = 0.25 #0.25
+        cycle_time = 0.3 #0.25
         bias = 0.2#0.1
         command_dead =0.1
         min_dist = 0.26
         max_dist = 0.29
         soft_dof_pos_limit = 0.98
         only_positive_rewards = True
+        target_foot_height = 0.05
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 1.5# Disable for standing task
             tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
-            feet_air_time_2 = 0.4#1.5
-            low_speed = 0.25
-            joint_pos =1
+            feet_air_time_2 = 0#0.4#1.5
+            low_speed = 0.5#2
+            joint_pos =0
             foot_slip = -2
             feet_contact_number = 0#0.5
-            feet_distance = 0.25#0.1#2
+            feet_distance =0#0.2#0.1#2
+            feet_clearance =2 #2
             tracking_pitch = 5 # Increased
-            rear_feet_contact_and_air = 4#4#1.5#1#1#3
+            rear_feet_contact_and_air = 4#4#4#1.5#1#1#3
             hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
@@ -145,9 +147,9 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         randomize_base_mass = True
         added_base_mass_range = [-1,1]
         push_robots = True
-        push_interval_s = 4
+        push_interval_s = 5
         max_push_vel_xy = 0.5
-        max_push_ang_vel = 0.5
+        max_push_ang_vel = 0.1
         randomize_link_mass = True
         multiplied_link_mass_range = [0.9, 1.1]
 

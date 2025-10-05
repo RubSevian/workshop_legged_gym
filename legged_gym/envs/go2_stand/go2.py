@@ -47,7 +47,6 @@ class Go2(LeggedRobot):
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
 
-
     def update_body_states(self):
         rb_states = self.gym.get_actor_rigid_body_states(self.sim, self.actor_handles[0], gymapi.STATE_ALL)
         body_states = gymtorch.wrap_tensor(rb_states).view(self.num_envs, self.num_bodies, 13)
@@ -73,9 +72,6 @@ class Go2(LeggedRobot):
         noise_vec[9:21] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
         noise_vec[21:33] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
         noise_vec[33:45] = 0. # previous actions
-        if self.cfg.terrain.measure_heights:
-            noise_vec[45:232] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
-
         return noise_vec
 
     def step(self,actions):
@@ -104,8 +100,6 @@ class Go2(LeggedRobot):
         if self.privileged_obs_buf is not None:
             self.privileged_obs_buf = torch.clip(self.privileged_obs_buf, -clip_obs, clip_obs)
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
- 
-
 
     def post_physics_step(self):
         super().post_physics_step()
@@ -188,7 +182,6 @@ class Go2(LeggedRobot):
         # Tracking
         base_quat = self.root_states[:, 3:7]
         euler = get_euler_xyz(base_quat)
-        # print(euler)
         episode_time_buf = self.episode_length_buf * self.dt
         pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
         pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
@@ -234,15 +227,11 @@ class Go2(LeggedRobot):
         contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
         contact_changes = torch.abs(contact.float() - self.last_contacts.float())  # [num_envs, 2]
         self.last_contacts = contact
-        # print(f"contact {contact}")
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        # print(f"contact_reward {contact_reward}")
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        # print(f"swing_reward {swing_reward}")
         contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
         undesired_contact_penalty = -10 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 1.0, dim=1)
-        # print(f"reward {contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty }")
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
     
 
@@ -252,8 +241,8 @@ class Go2(LeggedRobot):
             torch.square(self.actions + self.last_last_actions - 2 * self.last_actions),
             dim=1,
         )
-        term_3 = 0.015 * torch.sum(torch.abs(self.actions), dim=1)
-        return 0.15*term_1 + 0.1*term_2 + term_3
+        term_3 = 0.1 * torch.sum(torch.abs(self.actions), dim=1)
+        return 0.5*term_1 + 0.5*term_2 + term_3
     
     def _reward_low_speed(self):
         """
@@ -339,47 +328,7 @@ class Go2(LeggedRobot):
         # print(f"rew* {torch.sum(rew, dim=1)}")
         #print(f"Reward for feet slip (env 0): {rew}")
         return torch.sum(rew, dim=1)
-    
-    def _reward_feet_distance(self):
-        """
-        Calculates the reward based on the distance between the feet. Penilize feet get close to each other or too far away.
-        """
-        foot_pos = self.rigid_state[:, self.desired_contact_indices, :2]
-        foot_dist = torch.norm(foot_pos[:, 0, :] - foot_pos[:, 1, :], dim=1)
-        fd = self.cfg.rewards.min_dist
-        max_df = self.cfg.rewards.max_dist
-        d_min = torch.clamp(foot_dist - fd, -0.5, 0.0)
-        d_max = torch.clamp(foot_dist - max_df, 0, 0.5)
-        return (
-            torch.exp(-torch.abs(d_min) * 100) + torch.exp(-torch.abs(d_max) * 100)
-        ) / 2
-    
-    # def _reward_feet_clearance(self):
-    #     # Compute feet contact mask
-    #     contact = self.contact_forces[:, self.desired_contact_indices, 2] > 1.0
 
-    #     # Get the z-position of the feet and compute the change in z-position
-    #     feet_z = self.rigid_state[:, self.desired_contact_indices, 2] - 0.048
-    #     delta_z = feet_z - self.last_feet_z
-    #     self.feet_height += delta_z
-    #     self.last_feet_z = feet_z
-
-    #     # Compute swing mask
-    #     swing_mask = 1 - self._get_gait_phase()
-
-    #     # feet height should be closed to target feet height at the peak
-    #     rew_pos = (
-    #         torch.abs(self.feet_height - self.cfg.rewards.target_feet_height) < 0.01
-    #     )
-    #     rew_pos = torch.sum(rew_pos * swing_mask, dim=1)
-    #     self.feet_height *= ~contact
-    #     return rew_pos
-    
-    def _reward_feet_contact_number(self):
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 1.0
-        stance_mask = self._get_gait_phase()
-        reward = torch.where(contact == stance_mask, 1.0, -50.0)
-        return torch.mean(reward, dim=1)
     # def _reward_tracking_lin_vel(self):
     #     """
     #     Tracks linear velocity commands along the xy axes.

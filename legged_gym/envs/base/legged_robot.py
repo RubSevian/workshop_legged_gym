@@ -757,7 +757,7 @@ class LeggedRobot(BaseTask):
         self.contact_foot_indices = torch.zeros(len(contact_foot), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(contact_foot)):
             self.contact_foot_indices[i] = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], contact_foot[i])
-
+        self.rew_hide_leg=torch.zeros(1,dtype=torch.float,device=self.device,requires_grad=False)
     def _get_env_origins(self):
         """ Sets environment origins. On rough terrain the origins are defined by the terrain platforms.
             Otherwise create a grid.

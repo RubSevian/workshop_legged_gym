@@ -13,8 +13,8 @@ class Go2RoughCfg(LeggedRobotCfg):
         # vertical_scale = 0.001 # [m]
         # border_size = 25 # [m]
         # curriculum = False
-        # static_friction = 0.9
-        # dynamic_friction = 0.8
+        # static_friction = 0.8
+        # dynamic_friction = 0.6
         # restitution = 0.
         # # rough terrain only:
         # measure_heights = False
@@ -74,6 +74,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         foot_name = "foot"
         penalize_contacts_on = ["thigh", "calf", "base"]
         terminate_after_contacts_on = ["base"]
+        feet_name_reward=['RL_foot', 'RR_foot']
         contact_foot=['RL_foot', 'RR_foot']
         flip_visual_attachments = True
         fix_base_link = False
@@ -83,34 +84,29 @@ class Go2RoughCfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
-        tracking_sigma = 0.5
+        tracking_sigma = 0.7
         base_height_target = 0.6 # Match init_state pos
         cycle_time = 0.25 #0.25
         bias = 0.2#0.1
         command_dead =0.1
-        min_dist = 0.26
-        max_dist = 0.29
-        soft_dof_pos_limit = 0.98
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 1.5# Disable for standing task
+            tracking_lin_vel = 2.5# Disable for standing task
             tracking_ang_vel = 1.5
             lin_vel_z = 0.0
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             feet_air_time_2 = 0#1.5
-            low_speed = 0.25
-            joint_pos =1
+            low_speed = 0.005
+            joint_pos =2
             foot_slip = -2
-            feet_contact_number = 0#0.5
-            feet_distance = 0.25#2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
             hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
             com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
-            torques = -5e-5
-            dof_vel = -5e-4
+            torques = -5e-4
+            dof_vel = -5e-6
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -10#-5.0
             base_height =3#3#3 # Increased
@@ -129,19 +125,19 @@ class Go2RoughCfg(LeggedRobotCfg):
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 5. # time before command are changed[s]
+        resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.4, 0.4]  # Поощряем движение вперёд
-            lin_vel_y = [-0.2, 0.2] # Небольшое боковое движение
-            ang_vel_yaw = [-0.3, 0.3]
+            lin_vel_x = [-0.25, 0.25]  # Поощряем движение вперёд
+            lin_vel_y = [-0.25, 0.25] # Небольшое боковое движение
+            ang_vel_yaw = [0.0, 0.0]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
         friction_range = [0.7, 1.25]
         randomize_base_mass = True
-        added_base_mass_range = [-1,1]
+        added_base_mass_range = [-2,2]
         push_robots = True
         push_interval_s = 5
         max_push_vel_xy = 1.
@@ -149,14 +145,14 @@ class Go2RoughCfg(LeggedRobotCfg):
         multiplied_link_mass_range = [0.9, 1.1]
 
         randomize_base_com = True
-        added_base_com_range = [-0.02, 0.02]
+        added_base_com_range = [-0.03, 0.03]
         randomize_pd_gains = True
         stiffness_multiplier_range = [0.9, 1.1]  
         damping_multiplier_range = [0.9, 1.1]    
 
 
         randomize_motor_zero_offset = True
-        motor_zero_offset_range = [-0.035, 0.035] # Offset to add to the motor angles
+        motor_zero_offset_range = [-0.035, 0.035]
 
 class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     seed = 5
