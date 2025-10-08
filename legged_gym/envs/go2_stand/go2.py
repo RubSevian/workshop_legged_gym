@@ -35,13 +35,19 @@ class Go2(LeggedRobot):
     def compute_observations(self):
         """ Computes observations
         """
+        phase = self._get_phase()
+        sin_pos = torch.sin(2 * torch.pi * phase).unsqueeze(1)
+        cos_pos = torch.cos(2 * torch.pi * phase).unsqueeze(1)
+
         self.compute_ref_state()
         self.obs_buf = torch.cat((  self.base_ang_vel  * self.obs_scales.ang_vel,
                                     self.projected_gravity,
                                     self.commands[:, :3] * self.commands_scale,
                                     (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                                     self.dof_vel * self.obs_scales.dof_vel,
-                                    self.actions
+                                    self.actions,
+                                    sin_pos,  # 1
+                                    cos_pos  # 1
                                     ),dim=-1)
         # add noise if needed
         if self.add_noise:
@@ -144,6 +150,7 @@ class Go2(LeggedRobot):
     def _get_phase(self):
         cycle_time = self.cfg.rewards.cycle_time  # Период цикла шага (1.6 с)
         phase = (self.episode_length_buf * self.dt / cycle_time)  # Фаза цикла [0, 1] [num_envs]
+        # print(phase)
         return phase  # [num_envs]
 
     def _get_gait_phase(self):
@@ -328,6 +335,28 @@ class Go2(LeggedRobot):
         # print(f"rew* {torch.sum(rew, dim=1)}")
         #print(f"Reward for feet slip (env 0): {rew}")
         return torch.sum(rew, dim=1)
+    def _reward_feet_clearance(self):#鼓励抬脚高度
+        """
+        Поощряет подъём задних лап (RR, RL) на целевую высоту в фазе свинга для ритмичной походки.
+        Использует фиксированную целевую высоту (target_foot_height) и экспоненциальную награду.
+        Сбрасывает высоту при контакте и применяется только при движении (lin_vel > 0.1).
+        """
+        # Высота лап относительно земли
+        self.feet_height = self.rigid_state[:, self.desired_contact_indices, 2] - 0.02  # [num_envs, 2]
+        # print(f"Height {self.feet_height}")
+        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 1.0  # [num_envs, 2]
+        self.feet_height *= ~contact  # Сброс высоты при контакте
+        swing_mask = torch.logical_not(self._get_gait_phase())  # [num_envs, 2]
+        target_height = self.cfg.rewards.target_foot_height  # Фиксированная высота (например, 0.1 м)
+        # Экспоненциальная награда за близость к целевой высоте в свинге
+        error = torch.abs(self.feet_height - target_height)  # [num_envs, 2]
+        # print(f" height { self.feet_height }")
+        # print(error)
+        rew = torch.exp(-error * swing_mask )  # [num_envs, 2]
+        reward = torch.sum(rew, dim=1)  # [num_envs]
+        # Награда только при движении
+        # print(f"RearFeetClearance: reward={reward.mean()}, feet_height={self.feet_height.mean()}, target_height={target_height}, swing_mask={swing_mask.float().mean()}, moving={moving.float().mean()}, contact={contact.float().mean()}")
+        return reward
 
     # def _reward_tracking_lin_vel(self):
     #     """

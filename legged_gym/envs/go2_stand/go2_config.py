@@ -3,7 +3,7 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        num_observations = 45
+        num_observations = 47
         episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
@@ -13,8 +13,8 @@ class Go2RoughCfg(LeggedRobotCfg):
         # vertical_scale = 0.001 # [m]
         # border_size = 25 # [m]
         # curriculum = False
-        # static_friction = 0.8
-        # dynamic_friction = 0.6
+        static_friction = 0.8
+        dynamic_friction = 0.6
         # restitution = 0.
         # # rough terrain only:
         # measure_heights = False
@@ -85,10 +85,11 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.5
-        base_height_target = 0.6 # Match init_state pos
-        cycle_time = 0.25 #0.25
-        bias = 0.2#0.1
+        base_height_target = 0.5 # Match init_state pos
+        cycle_time = 0.4 #0.25
+        bias = 0.35#0.1
         command_dead =0.1
+        target_foot_height = 0.05
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2.5# Disable for standing task
             tracking_ang_vel = 1.5
@@ -96,8 +97,9 @@ class Go2RoughCfg(LeggedRobotCfg):
             ang_vel_xy = 0.0
             feet_air_time = 0#1.5
             feet_air_time_2 = 0#1.5
-            low_speed = 0.005
-            joint_pos =2
+            low_speed = 0.2
+            joint_pos =0.0
+            feet_clearance =2 
             foot_slip = -2
             tracking_pitch = 5 # Increased
             rear_feet_contact_and_air = 4#4#1.5#1#1#3
@@ -106,7 +108,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             feet_contact = 0##0.8#3.0  # Reduced to balance
             orientation = 0.0
             torques = -5e-4
-            dof_vel = -5e-6
+            dof_vel = -5e-5
             dof_acc = -2.5e-6 #es2432
             dof_pos_limits = -10#-5.0
             base_height =3#3#3 # Increased
@@ -118,6 +120,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             smoothness = -0.01
             stand_still = -0.
 
+
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
         roll = 0.
@@ -128,14 +131,14 @@ class Go2RoughCfg(LeggedRobotCfg):
         resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.25, 0.25]  # Поощряем движение вперёд
-            lin_vel_y = [-0.25, 0.25] # Небольшое боковое движение
-            ang_vel_yaw = [0.0, 0.0]
+            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
+            lin_vel_y = [-0.2, 0.2] # Небольшое боковое движение
+            ang_vel_yaw = [-0.3, 0.3]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
-        friction_range = [0.7, 1.25]
+        friction_range = [0.6, 1.15]
         randomize_base_mass = True
         added_base_mass_range = [-2,2]
         push_robots = True
