@@ -38,7 +38,6 @@ class Go2(LeggedRobot):
         phase = self._get_phase()
         sin_pos = torch.sin(2 * torch.pi * phase).unsqueeze(1)
         cos_pos = torch.cos(2 * torch.pi * phase).unsqueeze(1)
-
         self.compute_ref_state()
         self.obs_buf = torch.cat((  self.base_ang_vel  * self.obs_scales.ang_vel,
                                     self.projected_gravity,
@@ -49,6 +48,11 @@ class Go2(LeggedRobot):
                                     sin_pos,  # 1
                                     cos_pos  # 1
                                     ),dim=-1)
+        # add noise if needed
+        # add perceptive inputs if not blind
+        # if self.cfg.terrain.measure_heights:
+        #     heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
+        #     self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
         # add noise if needed
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
@@ -78,10 +82,14 @@ class Go2(LeggedRobot):
         noise_vec[9:21] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
         noise_vec[21:33] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
         noise_vec[33:45] = 0. # previous actions
+        noise_vec[45:46] =0.
+        noise_vec[46:47] = 0.
+        # if self.cfg.terrain.measure_heights:
+        #     noise_vec[47:234] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
         return noise_vec
 
     def step(self,actions):
-        #actions = self.ref_dof_pos*4
+        # actions = self.ref_dof_pos*4
         """ Apply actions, simulate, call self.post_physics_step()
 
         Args:
@@ -169,17 +177,17 @@ class Go2(LeggedRobot):
         sin_pos_l = sin_pos.clone()
         sin_pos_r = sin_pos.clone()
         self.ref_dof_pos = torch.zeros_like(self.dof_pos)
-        scale_1 = 1
+        scale_1 = 2
         scale_2 = 2 * scale_1
         # left foot stance phase set to default joint pos
         sin_pos_l[sin_pos_l > 0] = 0
-        # self.ref_dof_pos[:, 6] = sin_pos_l * scale_1
-        # self.ref_dof_pos[:, 7] = sin_pos_l * scale_2
+        self.ref_dof_pos[:, 6] = 0#sin_pos_l * scale_1
+        self.ref_dof_pos[:, 7] = 1.57
         self.ref_dof_pos[:, 8] = sin_pos_l * scale_1
         # right foot stance phase set to default joint pos
         sin_pos_r[sin_pos_r < 0] = 0
-        # self.ref_dof_pos[:, 9] = -sin_pos_r * scale_1
-        # self.ref_dof_pos[:, 10] = sin_pos_r * scale_2
+        self.ref_dof_pos[:, 9] = 0#-sin_pos_r * scale_1
+        self.ref_dof_pos[:, 10] = 1.57
         self.ref_dof_pos[:, 11] = -sin_pos_r * scale_1
         # Double support phase
         self.ref_dof_pos[torch.abs(sin_pos) < self.cfg.rewards.bias] = 0
@@ -191,8 +199,14 @@ class Go2(LeggedRobot):
         euler = get_euler_xyz(base_quat)
         episode_time_buf = self.episode_length_buf * self.dt
         pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
-        pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
+        # pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
+        # Clip для безопасности (между min being 0 и max=target)
+        pitch_command = torch.clamp(pitch_command, 0.0, self.cfg.commands.pitch)
         error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
+        # print(f"orient_grav{self.projected_gravity}")
+        # print(f"orient[0]{euler[:,0]}")
+        # print(f"orient[1]{euler[:,1]}")
+        # print(f"Diff {pitch_command-euler[:,1]}")
         return torch.exp(-1*error/self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
@@ -214,8 +228,12 @@ class Go2(LeggedRobot):
         # height_error = self.root_states[:, 2] - self.cfg.rewards.base_height_target
         # return torch.exp(-1* torch.square(height_error / self.cfg.rewards.tracking_sigma))
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        error = torch.square(base_height - self.cfg.rewards.base_height_target)
-        return torch.exp(-1* torch.square(error / self.cfg.rewards.tracking_sigma))
+        print(f"Base_height: {base_height}")
+        error = base_height - self.cfg.rewards.base_height_target
+        # print(f"ERROR {error}")
+        rew = torch.exp(-1* torch.square(error / (self.cfg.rewards.tracking_sigma)))
+        # print(f"REW {rew}")
+        return rew
 
 
     def _reward_com_over_support(self):
@@ -238,7 +256,7 @@ class Go2(LeggedRobot):
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
         swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
         contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -10 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 1.0, dim=1)
+        undesired_contact_penalty = -15 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 1.0, dim=1)
         return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
     
 
@@ -350,13 +368,22 @@ class Go2(LeggedRobot):
         target_height = self.cfg.rewards.target_foot_height  # Фиксированная высота (например, 0.1 м)
         # Экспоненциальная награда за близость к целевой высоте в свинге
         error = torch.abs(self.feet_height - target_height)  # [num_envs, 2]
-        # print(f" height { self.feet_height }")
+        print(f" height { self.feet_height }")
         # print(error)
         rew = torch.exp(-error * swing_mask )  # [num_envs, 2]
         reward = torch.sum(rew, dim=1)  # [num_envs]
         # Награда только при движении
         # print(f"RearFeetClearance: reward={reward.mean()}, feet_height={self.feet_height.mean()}, target_height={target_height}, swing_mask={swing_mask.float().mean()}, moving={moving.float().mean()}, contact={contact.float().mean()}")
         return reward
+    
+    # def _reward_feet_contact_forces(self):
+    #     return torch.sum(
+    #         (
+    #             torch.norm(self.contact_forces[:, self.feet_indices, :], dim=-1)
+    #             - self.cfg.rewards.max_contact_force
+    #         ).clip(0, 120),
+    #         dim=1,
+    #     )
 
     # def _reward_tracking_lin_vel(self):
     #     """

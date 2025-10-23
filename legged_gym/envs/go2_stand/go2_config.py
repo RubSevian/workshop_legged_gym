@@ -13,13 +13,13 @@ class Go2RoughCfg(LeggedRobotCfg):
         # vertical_scale = 0.001 # [m]
         # border_size = 25 # [m]
         # curriculum = False
-        static_friction = 0.8
-        dynamic_friction = 0.6
+        # static_friction = 0.8
+        # dynamic_friction = 0.8
         # restitution = 0.
         # # rough terrain only:
-        # measure_heights = False
-        # measured_points_x = [-0.20, -0.15, 0., 0.15, 0.20]
-        # measured_points_y = [-0.15, 0., 0.15]
+        # measure_heights = True
+        # measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
+        # measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
         # # measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8] # 1mx1.6m rectangle (without center line)
         # # measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
         # selected = False # select a unique terrain type and pass all arguments
@@ -85,55 +85,74 @@ class Go2RoughCfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.5
-        base_height_target = 0.5 # Match init_state pos
-        cycle_time = 0.4 #0.25
-        bias = 0.35#0.1
+        base_height_target = 0.50 # Match init_state pos
+        cycle_time = 0.25 #0.25
+        bias = 0.2#0.1
         command_dead =0.1
         target_foot_height = 0.05
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2.5# Disable for standing task
             tracking_ang_vel = 1.5
-            lin_vel_z = 0.0
-            ang_vel_xy = 0.0
-            feet_air_time = 0#1.5
-            feet_air_time_2 = 0#1.5
-            low_speed = 0.2
-            joint_pos =0.0
-            feet_clearance =2 
+            tracking_pitch = 5
+            hip_pos=3
+            base_height =3
+            feet_clearance =1 # not activate std 0.5
             foot_slip = -2
-            tracking_pitch = 5 # Increased
-            rear_feet_contact_and_air = 4#4#1.5#1#1#3
-            hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
-            com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
-            feet_contact = 0##0.8#3.0  # Reduced to balance
-            orientation = 0.0
+            low_speed = 0.005
+            rear_feet_contact_and_air = 4
+            smoothness = -0.01
             torques = -5e-4
             dof_vel = -5e-5
             dof_acc = -2.5e-6 #es2432
-            dof_pos_limits = -10#-5.0
-            base_height =3#3#3 # Increased
-            collision = -0.5#0.0001
-            termination = -10#10
+            lin_vel_z = 0.0
+            termination = -10
+            collision = -0.5
             dof_vel_limits = -10
-            feet_stumble = -0.0 
-            action_rate = 0#-0.01
-            smoothness = -0.01
-            stand_still = -0.
+            # feet_contact_forces = -0.02
+            # tracking_lin_vel = 1.5# Disable for standing task
+            # tracking_ang_vel = 1.5
+            # lin_vel_z = 0.0
+            # ang_vel_xy = 0.0
+            # feet_air_time = 0#1.5
+            # feet_air_time_2 = 0#1.5
+            # low_speed = 0.05
+            # joint_pos =0.0
+            # feet_clearance =1
+            # foot_slip = -2
+            # tracking_pitch = 5 # Increased
+            # rear_feet_contact_and_air = 4#4#1.5#1#1#3
+            # hip_pos=3#2#0.5#3#-1.5 #-2.#-1.0  # Activate to control rear joints
+            # com_over_support = 0#2#2#2#3#3#0.5#2#0.5#1.5#0.5#3.0  # Increased
+            # feet_contact = 0##0.8#3.0  # Reduced to balance
+            # orientation = 0.0
+            # torques = -5e-4
+            # dof_vel = -5e-5
+            # dof_acc = -2.5e-6 #es2432
+            # dof_pos_limits = -10#-5.0
+            # base_height =3#3#3 # Increased
+            # collision = -0.5#0.0001
+            # termination = -10#10
+            # dof_vel_limits = -10
+            # feet_stumble = -0.0 
+            # action_rate = 0#-0.01
+            # smoothness = -0.01
+            # stand_still = -0.
+            # feet_contact_forces = -0.02
 
 
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
         roll = 0.
-        standup_duration = 1.25
+        standup_duration = 1.5
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 10. # time before command are changed[s]
+        resampling_time = 5. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.5, 0.5]  # Поощряем движение вперёд
-            lin_vel_y = [-0.2, 0.2] # Небольшое боковое движение
-            ang_vel_yaw = [-0.3, 0.3]
+            lin_vel_x = [-0.3, 0.3]  # Поощряем движение вперёд
+            lin_vel_y = [-0.1, 0.1] # Небольшое боковое движение
+            ang_vel_yaw = [-0.0, 0.0]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
@@ -144,7 +163,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         push_robots = True
         push_interval_s = 5
         max_push_vel_xy = 0.5
-        max_push_ang_vel = 0.25
+        max_push_ang_vel = 0.05
         randomize_link_mass = True
         multiplied_link_mass_range = [0.9, 1.1]
 
@@ -165,7 +184,7 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     class policy(LeggedRobotCfgPPO.policy):
         init_noise_std = 1
         actor_hidden_dims = [512, 256, 128]
-        critic_hidden_dims = [768, 256, 128]
+        critic_hidden_dims = [512, 256, 128]
         
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
