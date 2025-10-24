@@ -90,6 +90,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         bias = 0.2#0.1
         command_dead =0.1
         target_foot_height = 0.05
+        max_contact_force = 125.
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2.5# Disable for standing task
             tracking_ang_vel = 1.5
@@ -108,7 +109,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             termination = -10
             collision = -0.5
             dof_vel_limits = -10
-            # feet_contact_forces = -0.02
+            feet_contact_forces = -0.02
             # tracking_lin_vel = 1.5# Disable for standing task
             # tracking_ang_vel = 1.5
             # lin_vel_z = 0.0
@@ -143,27 +144,27 @@ class Go2RoughCfg(LeggedRobotCfg):
     class commands(LeggedRobotCfg.commands):
         pitch = -1.57
         roll = 0.
-        standup_duration = 1.5
+        standup_duration = 1.25
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
-        resampling_time = 5. # time before command are changed[s]
+        resampling_time = 10. # time before command are changed[s]
         heading_command = True # if true: compute ang vel command from heading error
         class ranges(LeggedRobotCfg.commands.ranges):
             lin_vel_x = [-0.3, 0.3]  # Поощряем движение вперёд
-            lin_vel_y = [-0.1, 0.1] # Небольшое боковое движение
-            ang_vel_yaw = [-0.0, 0.0]
+            lin_vel_y = [-0.0, 0.0] # Небольшое боковое движение
+            ang_vel_yaw = [-0.2, 0.2]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         randomize_friction = True
-        friction_range = [0.6, 1.15]
+        friction_range = [0.7, 1.15]
         randomize_base_mass = True
         added_base_mass_range = [-2,2]
         push_robots = True
         push_interval_s = 5
         max_push_vel_xy = 0.5
-        max_push_ang_vel = 0.05
+        max_push_ang_vel = 0.25
         randomize_link_mass = True
         multiplied_link_mass_range = [0.9, 1.1]
 

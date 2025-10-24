@@ -228,7 +228,7 @@ class Go2(LeggedRobot):
         # height_error = self.root_states[:, 2] - self.cfg.rewards.base_height_target
         # return torch.exp(-1* torch.square(height_error / self.cfg.rewards.tracking_sigma))
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        print(f"Base_height: {base_height}")
+        # print(f"Base_height: {base_height}")
         error = base_height - self.cfg.rewards.base_height_target
         # print(f"ERROR {error}")
         rew = torch.exp(-1* torch.square(error / (self.cfg.rewards.tracking_sigma)))
@@ -368,7 +368,7 @@ class Go2(LeggedRobot):
         target_height = self.cfg.rewards.target_foot_height  # Фиксированная высота (например, 0.1 м)
         # Экспоненциальная награда за близость к целевой высоте в свинге
         error = torch.abs(self.feet_height - target_height)  # [num_envs, 2]
-        print(f" height { self.feet_height }")
+        # print(f" height { self.feet_height }")
         # print(error)
         rew = torch.exp(-error * swing_mask )  # [num_envs, 2]
         reward = torch.sum(rew, dim=1)  # [num_envs]
