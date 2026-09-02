@@ -1,7 +1,7 @@
 from legged_gym.utils.isaacgym_utils import get_euler_xyz
 from legged_gym.envs import LeggedRobot
 from isaacgym import gymtorch
-from isaacgym.torch_utils import quat_apply
+from isaacgym.torch_utils import quat_apply, torch_rand_float
 
 import torch
 
@@ -76,6 +76,87 @@ class Go2(LeggedRobot):
         self.biped_forward_axis = torch.tensor(
             [0.0, 0.0, -1.0], dtype=torch.float, device=self.device
         ).repeat(self.num_envs, 1)
+
+        if self.cfg.domain_rand.debug_randomization:
+            self._debug_domain_randomization()
+
+    def _debug_domain_randomization(self):
+        """Print and validate a small sample of Baseline v1 randomization."""
+        count = min(self.cfg.domain_rand.debug_randomization_envs, self.num_envs)
+        if count < 1:
+            return
+
+        probe_actions_scaled = torch.zeros_like(self.dof_pos)
+        probe_dof_pos = self.default_dof_pos.repeat(self.num_envs, 1)
+        probe_dof_vel = torch.full_like(self.dof_vel, 0.1)
+        probe_torques = self._compute_p_control_torques(
+            probe_actions_scaled, probe_dof_pos, probe_dof_vel
+        )
+
+        print("[go2_stand] Baseline v1 domain-randomization sample:")
+        for env_id in range(count):
+            friction = getattr(self, "friction_coeffs", None)
+            friction_value = (
+                float(friction[env_id].item()) if friction is not None else None
+            )
+            print(
+                f"  env={env_id} "
+                f"base_mass={self.randomized_body_masses[env_id, 0].item():.4f} "
+                f"link_mass_multiplier_mean="
+                f"{self.multiplied_link_masses_ratio[env_id].mean().item():.4f} "
+                f"base_com_offset={self.added_base_com[env_id].tolist()} "
+                f"friction={friction_value} "
+                f"kp_multiplier_mean={self.p_gains_multiplier[env_id].mean().item():.4f} "
+                f"kd_multiplier_mean={self.d_gains_multiplier[env_id].mean().item():.4f} "
+                f"zero_offset_mean={self.motor_zero_offsets[env_id].mean().item():.6f} "
+                f"probe_torque_mean={probe_torques[env_id].mean().item():.4f}"
+            )
+
+        if count > 1:
+            def require_variation(name, values):
+                if torch.allclose(values[:count], values[0].expand_as(values[:count])):
+                    raise RuntimeError(f"{name} does not vary across debug environments")
+
+            if self.cfg.domain_rand.randomize_friction:
+                require_variation("friction", self.friction_coeffs)
+            if self.cfg.domain_rand.randomize_base_mass:
+                require_variation("base mass", self.added_base_masses)
+            if self.cfg.domain_rand.randomize_link_mass:
+                require_variation(
+                    "link mass multipliers", self.multiplied_link_masses_ratio
+                )
+            if self.cfg.domain_rand.randomize_base_com:
+                require_variation("base CoM offset", self.added_base_com)
+            if self.cfg.domain_rand.randomize_pd_gains:
+                require_variation("Kp multipliers", self.p_gains_multiplier)
+                require_variation("Kd multipliers", self.d_gains_multiplier)
+                pd_only_probe = (
+                    -self.d_gains.unsqueeze(0)
+                    * self.d_gains_multiplier
+                    * probe_dof_vel
+                )
+                require_variation("PD-randomized probe torque", pd_only_probe)
+            if self.cfg.domain_rand.randomize_motor_zero_offset:
+                require_variation("motor zero offsets", self.motor_zero_offsets)
+                zero_only_probe = (
+                    self.p_gains.unsqueeze(0) * self.motor_zero_offsets
+                    - self.d_gains.unsqueeze(0) * probe_dof_vel
+                )
+                require_variation("zero-offset probe torque", zero_only_probe)
+
+            randomizes_controller = (
+                self.cfg.domain_rand.randomize_pd_gains
+                or self.cfg.domain_rand.randomize_motor_zero_offset
+            )
+            if randomizes_controller and torch.allclose(
+                probe_torques[:count], probe_torques[0].expand(count, -1)
+            ):
+                raise RuntimeError(
+                    "PD/zero-offset randomization did not change probe torques"
+                )
+            print(
+                "[go2_stand] controller torque randomization check: PASSED"
+            )
 
 
     def compute_observations(self):
@@ -230,9 +311,7 @@ class Go2(LeggedRobot):
         # поэтому результат больше не зависит от порядка rewards в config.
         self.last_rear_contacts.copy_(current)
 
-        self.standing_command_mask.copy_(
-            torch.norm(self.commands[:, :3], dim=1) <= self.cfg.rewards.command_dead
-        )
+        self.standing_command_mask.copy_(~self._is_locomotion_command())
         self.stance_mask = self._get_gait_phase()
         self.swing_mask = ~self.stance_mask
         self.swing_mask_l = self.swing_mask[:, 0]
@@ -242,7 +321,25 @@ class Go2(LeggedRobot):
         self.compute_ref_state()
 
     def reset_idx(self, env_ids):
+        # Save diagnostic accumulators before the base class clears episode
+        # state and reward sums.
+        episode_steps = self.episode_length_buf[env_ids].float().clone()
+        metric_values = {
+            name: values[env_ids].clone()
+            for name, values in self.baseline_metric_sums.items()
+        }
+        terminated = (~self.time_out_buf[env_ids]).float().clone()
         super().reset_idx(env_ids)
+        if len(env_ids) > 0:
+            denominator = episode_steps.clamp(min=1.0)
+            for name, values in metric_values.items():
+                self.extras["episode"][name] = torch.mean(values / denominator)
+                self.baseline_metric_sums[name][env_ids] = 0.0
+            self.extras["episode"]["episode_length_s"] = (
+                torch.mean(episode_steps) * self.dt
+            )
+            self.extras["episode"]["terminated_count"] = torch.sum(terminated)
+            self.extras["episode"]["termination_fraction"] = torch.mean(terminated)
         self.last_last_actions[env_ids] = 0.0
         self.obs_history[env_ids] = 0.0
         self.history_needs_init[env_ids] = True
@@ -286,13 +383,100 @@ class Go2(LeggedRobot):
         self.history_needs_init = torch.ones(
             self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False
         )
+        self.com_support_distance = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device,
+            requires_grad=False,
+        )
+        metric_names = (
+            "baseline_total_reward_per_step",
+            "front_feet_contact_rate",
+            "front_feet_contact_penalty_raw",
+            "mean_abs_torque",
+            "mean_abs_action",
+            "com_support_distance_m",
+            "forward_velocity_abs_error_m_s",
+            "lateral_velocity_abs_error_m_s",
+        )
+        self.baseline_metric_sums = {
+            name: torch.zeros(
+                self.num_envs, dtype=torch.float, device=self.device,
+                requires_grad=False,
+            )
+            for name in metric_names
+        }
         
 
         
     def _get_phase(self):
         cycle_time = self.cfg.rewards.cycle_time
-        # Ограничение [0, 1) сохраняет точность sin/cos на длинных episodes.
-        return torch.remainder(self.episode_length_buf * self.dt / cycle_time, 1.0)
+        # Locomotion clock starts only after stand-up. During stand-up actor sees
+        # a fixed sin/cos phase (0, 1), not a fictitious alternating gait.
+        episode_time = self.episode_length_buf * self.dt
+        locomotion_time = torch.clamp(
+            episode_time - self.cfg.commands.standup_duration, min=0.0
+        )
+        return torch.remainder(locomotion_time / cycle_time, 1.0)
+
+    def _get_locomotion_stage_blend(self):
+        """Smooth 0->1 transition after the stand-up interval."""
+        episode_time = self.episode_length_buf * self.dt
+        transition = self.cfg.commands.standup_transition_duration
+        if transition <= 0.0:
+            return (episode_time >= self.cfg.commands.standup_duration).float()
+        return torch.clamp(
+            (episode_time - self.cfg.commands.standup_duration) / transition,
+            min=0.0,
+            max=1.0,
+        )
+
+    def _is_locomotion_command(self):
+        """Classify commands without mixing m/s and rad/s in one norm."""
+        linear = (
+            torch.norm(self.commands[:, :2], dim=1)
+            > self.cfg.commands.linear_locomotion_threshold
+        )
+        yaw = (
+            torch.abs(self.commands[:, 2])
+            > self.cfg.commands.yaw_locomotion_threshold
+        )
+        return linear | yaw
+
+    def _resample_commands(self, env_ids):
+        """Sample commands using the same dead zones as gait-stage logic."""
+        self.commands[env_ids, 0] = torch_rand_float(
+            self.command_ranges["lin_vel_x"][0],
+            self.command_ranges["lin_vel_x"][1],
+            (len(env_ids), 1), device=self.device,
+        ).squeeze(1)
+        self.commands[env_ids, 1] = torch_rand_float(
+            self.command_ranges["lin_vel_y"][0],
+            self.command_ranges["lin_vel_y"][1],
+            (len(env_ids), 1), device=self.device,
+        ).squeeze(1)
+        if self.cfg.commands.heading_command:
+            self.commands[env_ids, 3] = torch_rand_float(
+                self.command_ranges["heading"][0],
+                self.command_ranges["heading"][1],
+                (len(env_ids), 1), device=self.device,
+            ).squeeze(1)
+        else:
+            self.commands[env_ids, 2] = torch_rand_float(
+                self.command_ranges["ang_vel_yaw"][0],
+                self.command_ranges["ang_vel_yaw"][1],
+                (len(env_ids), 1), device=self.device,
+            ).squeeze(1)
+
+        linear_active = (
+            torch.norm(self.commands[env_ids, :2], dim=1)
+            > self.cfg.commands.linear_locomotion_threshold
+        )
+        self.commands[env_ids, :2] *= linear_active.unsqueeze(1)
+        if not self.cfg.commands.heading_command:
+            yaw_active = (
+                torch.abs(self.commands[env_ids, 2])
+                > self.cfg.commands.yaw_locomotion_threshold
+            )
+            self.commands[env_ids, 2] *= yaw_active
 
     def _get_heading_frame_lin_vel(self):
         """Linear velocity in the horizontal frame of the upright robot.
@@ -328,7 +512,7 @@ class Go2(LeggedRobot):
         gait_mask[torch.abs(sin_pos) < self.cfg.rewards.bias] = 1 # Двойная опора при |sin| < bias
         # При нулевой команде робот должен стоять на обеих задних лапах, а не
         # продолжать принудительный цикл шагов.
-        standing = torch.norm(self.commands[:, :3], dim=1) <= self.cfg.rewards.command_dead
+        standing = ~self._is_locomotion_command()
         gait_mask[standing] = True
         return gait_mask  # [num_envs, 2]
     
@@ -358,6 +542,8 @@ class Go2(LeggedRobot):
 
     
     def _reward_tracking_pitch(self):
+        # TODO baseline ablation: replace Euler pitch/roll reward with a
+        # quaternion/projected-gravity orientation reward.
         base_quat = self.root_states[:, 3:7]
         euler = get_euler_xyz(base_quat)
         episode_time_buf = self.episode_length_buf * self.dt
@@ -372,19 +558,51 @@ class Go2(LeggedRobot):
         error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
         return torch.exp(-error / self.cfg.rewards.tracking_sigma)
 
+    def compute_reward(self):
+        """Compute training reward and accumulate non-shaping debug metrics."""
+        super().compute_reward()
+        heading_velocity = self._get_heading_frame_lin_vel()
+        front_contact = (
+            torch.norm(
+                self.contact_forces[:, [self.fl_foot_idx, self.fr_foot_idx], :],
+                dim=2,
+            )
+            > self.cfg.rewards.undesired_contact_force
+        ).float().mean(dim=1)
+        self.baseline_metric_sums["baseline_total_reward_per_step"] += self.rew_buf
+        self.baseline_metric_sums["front_feet_contact_rate"] += front_contact
+        self.baseline_metric_sums["front_feet_contact_penalty_raw"] += (
+            -15.0 * front_contact * 2.0
+        )
+        self.baseline_metric_sums["mean_abs_torque"] += torch.mean(
+            torch.abs(self.torques), dim=1
+        )
+        self.baseline_metric_sums["mean_abs_action"] += torch.mean(
+            torch.abs(self.actions), dim=1
+        )
+        self.baseline_metric_sums["com_support_distance_m"] += self.com_support_distance
+        self.baseline_metric_sums["forward_velocity_abs_error_m_s"] += torch.abs(
+            self.commands[:, 0] - heading_velocity[:, 0]
+        )
+        self.baseline_metric_sums["lateral_velocity_abs_error_m_s"] += torch.abs(
+            self.commands[:, 1] - heading_velocity[:, 1]
+        )
+
     def _reward_tracking_lin_vel(self):
         # Команды x/y заданы в горизонтальной системе вертикального робота.
         heading_lin_vel = self._get_heading_frame_lin_vel()
         error = torch.sum(
             torch.square(self.commands[:, :2] - heading_lin_vel[:, :2]), dim=1
         )
-        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+        reward = torch.exp(-error / self.cfg.rewards.tracking_sigma)
+        return reward * self._get_locomotion_stage_blend()
 
     def _reward_tracking_ang_vel(self):
         # Поворот влево/вправо — вращение вокруг мировой вертикали. Компонента
         # base_ang_vel[:, 2] после pitch=-90 относится уже к другой мировой оси.
         yaw_rate_error = torch.square(self.commands[:, 2] - self.root_states[:, 12])
-        return torch.exp(-yaw_rate_error / self.cfg.rewards.tracking_sigma)
+        reward = torch.exp(-yaw_rate_error / self.cfg.rewards.tracking_sigma)
+        return reward * self._get_locomotion_stage_blend()
     
     def _reward_hip_pos(self):
         error = torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
@@ -437,6 +655,7 @@ class Go2(LeggedRobot):
         )
 
         distance_to_support = torch.norm(com[:, :2] - closest_support_point, dim=1)
+        self.com_support_distance.copy_(distance_to_support)
         # Стопы имеют ненулевую площадь. Внутри margin reward максимален,
         # снаружи плавно убывает с отдельной sigma в метрах.
         outside_distance = torch.clamp(
@@ -451,8 +670,20 @@ class Go2(LeggedRobot):
     def _reward_rear_feet_contact_and_air(self):
         contact = self.current_rear_contacts
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
-        contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)
+        scheduled_match = torch.sum(
+            contact * gait_mask + (~contact) * (~gait_mask), dim=1
+        ).float()
+        # During stand-up (and for a standing command) both rear feet should be
+        # loaded. Alternating contact is introduced smoothly after stand-up.
+        rear_support = torch.sum(contact, dim=1).float()
+        locomotion_blend = (
+            self._get_locomotion_stage_blend()
+            * self._is_locomotion_command().float()
+        )
+        contact_reward = (
+            (1.0 - locomotion_blend) * rear_support
+            + locomotion_blend * scheduled_match
+        )
         undesired_contact = (
             torch.norm(self.contact_forces[:, self.undesired_contact_indices, :], dim=2)
             > self.cfg.rewards.undesired_contact_force
@@ -461,7 +692,7 @@ class Go2(LeggedRobot):
         # Каждый нормальный шаг содержит два переключения контакта. Отдельный
         # penalty за любое переключение конфликтовал с gait mask, поэтому его
         # убираем; несвоевременный контакт уже уменьшает match reward.
-        return contact_reward + swing_reward + undesired_contact_penalty
+        return contact_reward + undesired_contact_penalty
     
 
     def _reward_smoothness(self):
@@ -504,7 +735,11 @@ class Go2(LeggedRobot):
         reward[speed_desired] = 1.2
         # Sign mismatch has the highest priority
         reward[sign_mismatch] = -2.0
-        return reward * (self.commands[:, 0].abs() > self.cfg.rewards.command_dead)
+        return (
+            reward
+            * (self.commands[:, 0].abs() > self.cfg.commands.linear_locomotion_threshold)
+            * self._get_locomotion_stage_blend()
+        )
     
     def _reward_joint_pos(self):
         """
@@ -566,8 +801,11 @@ class Go2(LeggedRobot):
         # Маску умножаем СНАРУЖИ exp. Иначе в stance exp(0)=1 давал
         # постоянный максимальный бонус независимо от высоты лапы.
         reward_per_foot = torch.exp(-torch.square(error)) * swing_mask.float()
-        moving = torch.norm(self.commands[:, :3], dim=1) > self.cfg.rewards.command_dead
-        return torch.sum(reward_per_foot, dim=1) * moving
+        locomotion_blend = (
+            self._get_locomotion_stage_blend()
+            * self._is_locomotion_command().float()
+        )
+        return torch.sum(reward_per_foot, dim=1) * locomotion_blend
     
     # def _reward_feet_contact_forces(self):
     #     return torch.sum(

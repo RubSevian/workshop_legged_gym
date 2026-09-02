@@ -100,9 +100,9 @@ class Go2RoughCfg(LeggedRobotCfg):
         # Separate parameter fixes accidental coupling while 0.50 preserves the
         # old reward curve. Narrow it only after plotting/benchmarking the reward.
         base_height_sigma = 0.50  # [m]
-        cycle_time = 0.25 #0.25
+        # Baseline v1: exactly 20 policy steps per gait cycle (0.40 / 0.02).
+        cycle_time = 0.40
         bias = 0.2#0.1
-        command_dead =0.1
         target_foot_height = 0.05
         clearance_sigma = 0.03  # [m]
         foot_radius = 0.02  # [m], URDF collision radius
@@ -167,6 +167,10 @@ class Go2RoughCfg(LeggedRobotCfg):
         pitch = -1.57
         roll = 0.
         standup_duration = 1.25
+        standup_transition_duration = 0.30
+        # Linear [m/s] and yaw [rad/s] commands use separate dead zones.
+        linear_locomotion_threshold = 0.20
+        yaw_locomotion_threshold = 0.10
         curriculum = False
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
@@ -182,6 +186,10 @@ class Go2RoughCfg(LeggedRobotCfg):
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
+        # Set True only for a short diagnostic run; prints a few environments
+        # and checks that identical states produce different randomized torques.
+        debug_randomization = False
+        debug_randomization_envs = 3
         randomize_friction = True
         friction_range = [0.7, 1.15]
         randomize_base_mass = True
@@ -215,5 +223,8 @@ class Go2RoughCfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'go2_stand'
+        # Stand-up stage is tied to physical episode time. Random initial episode
+        # lengths would start lying robots in the locomotion stage.
+        init_at_random_ep_len = False
         num_steps_per_env = 60 # per iteration
         max_iterations = 10000

@@ -14,8 +14,14 @@ The JSON report is written to ``GO2_EVAL_OUTPUT`` (default:
 
 import json
 import os
+import sys
 from collections import defaultdict
 
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+import isaacgym  # noqa: F401 - must be imported before torch in Isaac Gym
 import torch
 
 from legged_gym.envs import *  # noqa: F401,F403 - registers environments
@@ -55,18 +61,19 @@ def intended_pitch_target(env):
 
 
 def add_command_bucket_metrics(metrics, env, valid, x_error, y_error, yaw_error):
-    dead = float(env.cfg.rewards.command_dead)
+    linear_dead = float(env.cfg.commands.linear_locomotion_threshold)
+    yaw_dead = float(env.cfg.commands.yaw_locomotion_threshold)
     command_x = env.commands[:, 0]
     command_y = env.commands[:, 1]
     command_yaw = env.commands[:, 2]
     buckets = {
-        "forward": command_x > dead,
-        "backward": command_x < -dead,
-        "strafe_left": (command_x.abs() <= dead) & (command_y > dead),
-        "strafe_right": (command_x.abs() <= dead) & (command_y < -dead),
-        "turn_left": (command_x.abs() <= dead) & (command_y.abs() <= dead) & (command_yaw > dead),
-        "turn_right": (command_x.abs() <= dead) & (command_y.abs() <= dead) & (command_yaw < -dead),
-        "idle": torch.norm(env.commands[:, :3], dim=1) <= dead,
+        "forward": command_x > linear_dead,
+        "backward": command_x < -linear_dead,
+        "strafe_left": (command_x.abs() <= linear_dead) & (command_y > linear_dead),
+        "strafe_right": (command_x.abs() <= linear_dead) & (command_y < -linear_dead),
+        "turn_left": (torch.norm(env.commands[:, :2], dim=1) <= linear_dead) & (command_yaw > yaw_dead),
+        "turn_right": (torch.norm(env.commands[:, :2], dim=1) <= linear_dead) & (command_yaw < -yaw_dead),
+        "idle": ~env._is_locomotion_command(),
     }
     for name, bucket_mask in buckets.items():
         selected = valid & bucket_mask

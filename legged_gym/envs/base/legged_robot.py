@@ -325,24 +325,38 @@ class LeggedRobot(BaseTask):
         #         sum += p.mass
         #         print(f"Mass of body {i}: {p.mass} (before randomization)")
         #     print(f"Total mass {sum} (before randomization)")
-        # randomize base mass
+        # Store randomization per environment so it can be inspected later.
         if self.cfg.domain_rand.randomize_base_mass:
-            self.added_base_masses = torch_rand_float(self.cfg.domain_rand.added_base_mass_range[0], self.cfg.domain_rand.added_base_mass_range[1], (1, 1), device=self.device)
-            props[0].mass += self.added_base_masses
+            self.added_base_masses[env_id] = torch_rand_float(
+                self.cfg.domain_rand.added_base_mass_range[0],
+                self.cfg.domain_rand.added_base_mass_range[1],
+                (1, 1), device=self.device,
+            )
+            props[0].mass += self.added_base_masses[env_id, 0].item()
 
-                # randomize link masses
         if self.cfg.domain_rand.randomize_link_mass:
-            self.multiplied_link_masses_ratio = torch_rand_float(self.cfg.domain_rand.multiplied_link_mass_range[0], self.cfg.domain_rand.multiplied_link_mass_range[1], (1, self.num_bodies-1), device=self.device)
-    
+            self.multiplied_link_masses_ratio[env_id] = torch_rand_float(
+                self.cfg.domain_rand.multiplied_link_mass_range[0],
+                self.cfg.domain_rand.multiplied_link_mass_range[1],
+                (1, self.num_bodies - 1), device=self.device,
+            )
             for i in range(1, len(props)):
-                props[i].mass *= self.multiplied_link_masses_ratio[0,i-1]
+                props[i].mass *= self.multiplied_link_masses_ratio[env_id, i - 1].item()
 
-        # randomize base com
         if self.cfg.domain_rand.randomize_base_com:
-            self.added_base_com = torch_rand_float(self.cfg.domain_rand.added_base_com_range[0], self.cfg.domain_rand.added_base_com_range[1], (1, 3), device=self.device)
-            props[0].com += gymapi.Vec3(self.added_base_com[0, 0], self.added_base_com[0, 1],
-                                    self.added_base_com[0, 2])
+            self.added_base_com[env_id] = torch_rand_float(
+                self.cfg.domain_rand.added_base_com_range[0],
+                self.cfg.domain_rand.added_base_com_range[1],
+                (1, 3), device=self.device,
+            )
+            offset = self.added_base_com[env_id]
+            props[0].com += gymapi.Vec3(
+                offset[0].item(), offset[1].item(), offset[2].item()
+            )
 
+        self.randomized_body_masses[env_id] = torch.tensor(
+            [prop.mass for prop in props], dtype=torch.float, device=self.device
+        )
         return props
     
     def _post_physics_step_callback(self):
@@ -389,19 +403,35 @@ class LeggedRobot(BaseTask):
         Returns:
             [torch.Tensor]: Torques sent to the simulation
         """
-        #pd controller
+        # Motor zero offset is an angular calibration error [rad]. It changes
+        # the position target directly and must not be multiplied by action_scale.
         actions_scaled = actions * self.cfg.control.action_scale
         control_type = self.cfg.control.control_type
-        actions=(actions + self.motor_zero_offsets)
         if control_type=="P":
-            torques = self.p_gains*(actions_scaled + self.default_dof_pos - self.dof_pos) - self.d_gains*self.dof_vel
+            torques = self._compute_p_control_torques(
+                actions_scaled, self.dof_pos, self.dof_vel
+            )
         elif control_type=="V":
-            torques = self.p_gains*(actions_scaled - self.dof_vel) - self.d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
+            effective_p_gains = self.p_gains.unsqueeze(0) * self.p_gains_multiplier
+            effective_d_gains = self.d_gains.unsqueeze(0) * self.d_gains_multiplier
+            torques = effective_p_gains*(actions_scaled - self.dof_vel) - effective_d_gains*(self.dof_vel - self.last_dof_vel)/self.sim_params.dt
         elif control_type=="T":
             torques = actions_scaled
         else:
             raise NameError(f"Unknown controller type: {control_type}")
         return torch.clip(torques, -self.torque_limits, self.torque_limits)
+
+    def _compute_p_control_torques(self, actions_scaled, dof_pos, dof_vel):
+        """Return unclipped position-controller torque for all environments."""
+        effective_p_gains = self.p_gains.unsqueeze(0) * self.p_gains_multiplier
+        effective_d_gains = self.d_gains.unsqueeze(0) * self.d_gains_multiplier
+        position_target = (
+            self.default_dof_pos + actions_scaled + self.motor_zero_offsets
+        )
+        return (
+            effective_p_gains * (position_target - dof_pos)
+            - effective_d_gains * dof_vel
+        )
 
     def _reset_dofs(self, env_ids):
         """ Resets DOF position and velocities of selected environmments
@@ -714,6 +744,10 @@ class LeggedRobot(BaseTask):
         self.d_gains = torch.zeros(self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.p_gains_multiplier = torch.ones(self.num_envs,self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains_multiplier = torch.ones(self.num_envs,self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.added_base_masses = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device, requires_grad=False)
+        self.multiplied_link_masses_ratio = torch.ones(self.num_envs, self.num_bodies - 1, dtype=torch.float, device=self.device, requires_grad=False)
+        self.added_base_com = torch.zeros(self.num_envs, 3, dtype=torch.float, device=self.device, requires_grad=False)
+        self.randomized_body_masses = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.float, device=self.device, requires_grad=False)
 
         self._get_env_origins()
         env_lower = gymapi.Vec3(0., 0., 0.)

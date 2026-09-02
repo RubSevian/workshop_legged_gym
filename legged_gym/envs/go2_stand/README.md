@@ -2,6 +2,7 @@
 
 Окружение обучает Unitree Go2 вставать на задние лапы и выполнять команды
 продольной скорости $c_x$, боковой скорости $c_y$ и угловой скорости $c_\omega$.
+Текущая конфигурация зафиксирована как минимальный **Baseline v1**.
 
 ## История наблюдений actor
 
@@ -63,6 +64,36 @@ $$
 Следовательно, `scale` из config является приблизительным вкладом reward в
 секунду, а фактический коэффициент одного policy step равен $0.02w_i$.
 
+## Stand-up и locomotion stages
+
+Первые $T_{\mathrm{stand}}=1.25$ с робот только встаёт. Затем locomotion-rewards
+включаются за $T_{\mathrm{transition}}=0.30$ с с коэффициентом
+
+$$
+\beta(t)=\operatorname{clip}\left(
+\frac{t-T_{\mathrm{stand}}}{T_{\mathrm{transition}}},0,1
+\right).
+$$
+
+`tracking_lin_vel` и `tracking_ang_vel` умножаются на $\beta$. Контактное
+чередование и `feet_clearance` умножаются также на признак locomotion-команды.
+До этого обе задние стопы должны находиться в опоре, а контакт передних стоп и
+остальных нежелательных звеньев штрафуется.
+
+Линейная и угловая команды классифицируются раздельно:
+
+$$
+I_{\mathrm{loc}}=
+\mathbb{1}[\lVert(c_x,c_y)\rVert_2>0.20]
+\lor
+\mathbb{1}[|c_\omega|>0.10].
+$$
+
+Здесь пороги имеют разные единицы: $0.20$ м/с и $0.10$ рад/с. Малые команды
+обнуляются sampler-ом с теми же порогами. Период gait равен $0.40$ с, то есть
+ровно $0.40/0.02=20$ policy steps. Фаза locomotion начинается после stand-up;
+до него observation содержит $\sin\phi=0$, $\cos\phi=1$.
+
 ## Формулы custom rewards
 
 ### Ориентация `tracking_pitch`
@@ -89,7 +120,7 @@ $$
 $-Z$ корпуса:
 
 $$
-r_v=\exp\left(-\frac{(c_x-v_x)^2+(c_y-v_y)^2}
+r_v'=\beta(t)\exp\left(-\frac{(c_x-v_x)^2+(c_y-v_y)^2}
 {\sigma_{\mathrm{tracking}}}\right).
 $$
 
@@ -98,7 +129,7 @@ $$
 Используется угловая скорость вокруг мировой вертикали $\omega_z^W$:
 
 $$
-r_\omega=\exp\left(-\frac{(c_\omega-\omega_z^W)^2}
+r_\omega'=\beta(t)\exp\left(-\frac{(c_\omega-\omega_z^W)^2}
 {\sigma_{\mathrm{tracking}}}\right).
 $$
 
@@ -166,7 +197,8 @@ r_{\mathrm{match}}=\sum_j
 $$
 
 $$
-r_{\mathrm{contact}}=r_{\mathrm{match}}
+r_{\mathrm{contact}}=(1-\beta I_{\mathrm{loc}})
+\sum_j C_j+\beta I_{\mathrm{loc}}r_{\mathrm{match}}
 -15\sum_{k\in\mathcal U}\mathbb{1}[\lVert F_k\rVert_2>F_{\mathrm{bad}}].
 $$
 
@@ -179,7 +211,7 @@ Reward не изменяет историю контактов: она обно�
 Только для swing-лап и ненулевой команды:
 
 $$
-r_{\mathrm{clear}}=\mathbb{1}[\lVert c\rVert>c_{\mathrm{dead}}]
+r_{\mathrm{clear}}'=\beta I_{\mathrm{loc}}
 \sum_j(1-G_j)\exp\left[-\left(
 \frac{h_j-h_{\mathrm{foot}}^*}{\sigma_{\mathrm{clear}}}
 \right)^2\right].
@@ -250,6 +282,52 @@ $$
 p_{\mathrm{termination}}=
 \mathbb{1}[\text{reset не по timeout}].
 $$
+
+## Domain randomization контроллера
+
+Для position control target и эффективные gains имеют вид
+
+$$
+q_{\mathrm{target}}=q_0+s_a a+\Delta q_{\mathrm{zero}},
+$$
+
+$$
+K_p^{\mathrm{eff}}=K_p k_p,
+\qquad
+K_d^{\mathrm{eff}}=K_d k_d,
+$$
+
+$$
+\tau=K_p^{\mathrm{eff}}(q_{\mathrm{target}}-q)
+-K_d^{\mathrm{eff}}\dot q.
+$$
+
+$\Delta q_{\mathrm{zero}}$ измеряется в радианах и поэтому не умножается на
+`action_scale`. При выключенной randomization множители равны единице, offset
+равен нулю, и контроллер совпадает с исходным.
+
+Перед длинным обучением randomization можно проверить командой:
+
+```bash
+python legged_gym/scripts/debug_go2_randomization.py \
+    --task=go2_stand --headless
+```
+
+Она выводит значения нескольких env и проверяет torque на одинаковых
+$q$, $\dot q$ и action.
+
+## TensorBoard debug metrics
+
+Стандартный runner уже пишет `Train/mean_reward`,
+`Train/mean_episode_length` и отдельные активные reward terms: velocity,
+pitch, CoM-support, rear gait и clearance. Дополнительно Baseline v1 пишет:
+
+- `baseline_total_reward_per_step`;
+- `front_feet_contact_rate`, `front_feet_contact_penalty_raw`;
+- `mean_abs_torque`, `mean_abs_action`;
+- `com_support_distance_m`;
+- `forward_velocity_abs_error_m_s`, `lateral_velocity_abs_error_m_s`;
+- `episode_length_s`, `terminated_count`, `termination_fraction`.
 
 ## Текущие scales
 
