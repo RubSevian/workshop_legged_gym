@@ -1,14 +1,15 @@
-from legged_gym import LEGGED_GYM_ROOT_DIR
 from legged_gym.utils.isaacgym_utils import get_euler_xyz
 from legged_gym.envs import LeggedRobot
-from isaacgym import gymtorch, gymapi
+from isaacgym import gymtorch
+from isaacgym.torch_utils import quat_apply
 
 import torch
 
 class Go2(LeggedRobot):
     def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
-        # Initialize indices for feet and thighs
+        # Индексы вычисляются один раз: искать body/DOF handles внутри reward
+        # дорого, потому что reward вызывается для каждого policy step.
         self.rr_foot_idx = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "RR_foot")
         self.rl_foot_idx = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "RL_foot")
         self.fl_foot_idx = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "FL_foot")
@@ -22,45 +23,112 @@ class Go2(LeggedRobot):
         self.fl_calf_idx = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "FL_calf")
         self.fr_calf_idx = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "FR_calf")
         self.base_index = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actor_handles[0], "base")
-        self.body_state_buffer = torch.zeros((self.num_envs, self.num_bodies, 13), device=self.device)
         self.desired_contact_indices = torch.tensor([self.rr_foot_idx, self.rl_foot_idx], dtype=torch.long, device=self.device, requires_grad=False)
         self.undesired_contact_indices = torch.tensor([self.fl_foot_idx, self.fr_foot_idx, self.rr_thigh_idx, self.rl_thigh_idx, self.fl_thigh_idx, self.fr_thigh_idx, self.rr_calf_idx, self.rl_calf_idx, self.fl_calf_idx, self.fr_calf_idx], dtype=torch.long, device=self.device, requires_grad=False)
-        # self.last_contacts = torch.zeros(self.num_envs, self.num_bodies, dtype=torch.bool, device=self.device)
-        self.last_contacts = torch.zeros(self.num_envs, len(self.desired_contact_indices), dtype=torch.bool, device=self.device)  # [num_envs, 2]
-        self.feet_air_time = torch.zeros(self.num_envs, len(self.desired_contact_indices), dtype=torch.float, device=self.device)  # [num_envs, 2]
-        self.num_bodies = self.gym.get_actor_rigid_body_count(self.envs[0], self.actor_handles[0])
-        
+
+        hip_names = ["FR_hip_joint", "FL_hip_joint", "RR_hip_joint", "RL_hip_joint"]
+        self.hip_indices = torch.tensor(
+            [self.dof_names.index(name) for name in hip_names],
+            dtype=torch.long,
+            device=self.device,
+        )
+        self.rl_leg_indices = torch.tensor(
+            [self.dof_names.index(f"RL_{part}_joint") for part in ("hip", "thigh", "calf")],
+            dtype=torch.long,
+            device=self.device,
+        )
+        self.rr_leg_indices = torch.tensor(
+            [self.dof_names.index(f"RR_{part}_joint") for part in ("hip", "thigh", "calf")],
+            dtype=torch.long,
+            device=self.device,
+        )
+
+        # Собственная история только для двух задних лап. Буферы базового класса
+        # last_contacts/feet_air_time оставляем нетронутыми: они имеют размер по
+        # всем стопам и могут использоваться стандартными reward-функциями.
+        rear_shape = (self.num_envs, len(self.desired_contact_indices))
+        self.current_rear_contacts = torch.zeros(rear_shape, dtype=torch.bool, device=self.device)
+        self.filtered_rear_contacts = torch.zeros(rear_shape, dtype=torch.bool, device=self.device)
+        self.last_rear_contacts = torch.zeros(rear_shape, dtype=torch.bool, device=self.device)
+        self.rear_contact_changes = torch.zeros(rear_shape, dtype=torch.float, device=self.device)
+        self.rear_feet_air_time = torch.zeros(rear_shape, dtype=torch.float, device=self.device)
+
+        self.body_masses = None
+        self.body_local_coms = None
+        if getattr(self.cfg.rewards.scales, "com_over_support", 0.0) != 0.0:
+            # Массы нужны для настоящего mass-weighted CoM. Считываем их только
+            # когда reward включён: при тысячах env это заметная работа на CPU.
+            body_masses = []
+            body_local_coms = []
+            for env, actor in zip(self.envs, self.actor_handles):
+                properties = self.gym.get_actor_rigid_body_properties(env, actor)
+                body_masses.append([prop.mass for prop in properties])
+                body_local_coms.append(
+                    [[prop.com.x, prop.com.y, prop.com.z] for prop in properties]
+                )
+            self.body_masses = torch.tensor(body_masses, dtype=torch.float, device=self.device)
+            self.body_local_coms = torch.tensor(
+                body_local_coms, dtype=torch.float, device=self.device
+            )
+
+        # При pitch=-pi/2 продольное горизонтальное направление робота — -body Z,
+        # а стандартная body X смотрит вверх. Эту ось используем для команд x/y.
+        self.biped_forward_axis = torch.tensor(
+            [0.0, 0.0, -1.0], dtype=torch.float, device=self.device
+        ).repeat(self.num_envs, 1)
 
 
     def compute_observations(self):
-        """ Computes observations
-        """
+        """Compute one measurable frame and append it to actor history."""
         phase = self._get_phase()
         sin_pos = torch.sin(2 * torch.pi * phase).unsqueeze(1)
         cos_pos = torch.cos(2 * torch.pi * phase).unsqueeze(1)
-        self.compute_ref_state()
-        self.obs_buf = torch.cat((  self.base_ang_vel  * self.obs_scales.ang_vel,
-                                    self.projected_gravity,
-                                    self.commands[:, :3] * self.commands_scale,
-                                    (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
-                                    self.dof_vel * self.obs_scales.dof_vel,
-                                    self.actions,
-                                    sin_pos,  # 1
-                                    cos_pos  # 1
-                                    ),dim=-1)
-        # add noise if needed
-        # add perceptive inputs if not blind
-        # if self.cfg.terrain.measure_heights:
-        #     heights = torch.clip(self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights, -1, 1.) * self.obs_scales.height_measurements
-        #     self.obs_buf = torch.cat((self.obs_buf, heights), dim=-1)
-        # add noise if needed
-        if self.add_noise:
-            self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
+        # Здесь только сигналы, доступные на реальном роботе. Линейная скорость
+        # остаётся simulation-only и используется reward/evaluator, но не actor.
+        current_obs = torch.cat(
+            (
+                self.base_ang_vel * self.obs_scales.ang_vel,
+                self.projected_gravity,
+                self.commands[:, :3] * self.commands_scale,
+                (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+                self.dof_vel * self.obs_scales.dof_vel,
+                self.actions,
+                sin_pos,
+                cos_pos,
+            ),
+            dim=-1,
+        )
+        if current_obs.shape[1] != self.cfg.env.num_single_observations:
+            raise RuntimeError(
+                "go2_stand single observation size does not match "
+                "cfg.env.num_single_observations"
+            )
 
-    def update_body_states(self):
-        rb_states = self.gym.get_actor_rigid_body_states(self.sim, self.actor_handles[0], gymapi.STATE_ALL)
-        body_states = gymtorch.wrap_tensor(rb_states).view(self.num_envs, self.num_bodies, 13)
-        self.body_state_buffer.copy_(body_states)
+        # Шум добавляется только свежему измерению. Если шумить готовый стек,
+        # старые кадры получали бы новый независимый шум на каждом policy step.
+        if self.add_noise:
+            current_obs += (
+                2 * torch.rand_like(current_obs) - 1
+            ) * self.single_obs_noise_scale
+
+        self._append_observation_history(current_obs)
+
+    def _append_observation_history(self, current_obs):
+        """Append one frame and expose the flattened oldest-to-newest history."""
+        self.obs_history = torch.roll(self.obs_history, shifts=-1, dims=1)
+        self.obs_history[:, -1, :] = current_obs
+
+        # После reset повторяем первый валидный кадр K раз. Нулевые кадры были
+        # бы искусственным признаком reset, которого не будет на реальном Go2.
+        init_ids = self.history_needs_init.nonzero(as_tuple=False).flatten()
+        if len(init_ids) > 0:
+            self.obs_history[init_ids] = current_obs[init_ids].unsqueeze(1).repeat(
+                1, self.cfg.env.history_length, 1
+            )
+            self.history_needs_init[init_ids] = False
+
+        # Порядок: от самого старого кадра к текущему.
+        self.obs_buf = self.obs_history.reshape(self.num_envs, -1)
 
     def _get_noise_scale_vec(self, cfg):
         """ Sets a vector used to scale the noise added to the observations.
@@ -72,21 +140,37 @@ class Go2(LeggedRobot):
         Returns:
             [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
         """
-        noise_vec = torch.zeros_like(self.obs_buf[0])
+        if cfg.env.history_length < 1:
+            raise ValueError("cfg.env.history_length must be at least 1")
+        if cfg.env.num_single_observations != 47:
+            raise ValueError("go2_stand currently defines exactly 47 values per frame")
+        expected_num_obs = cfg.env.num_single_observations * cfg.env.history_length
+        if cfg.env.num_observations != expected_num_obs:
+            raise ValueError(
+                "cfg.env.num_observations must equal "
+                "num_single_observations * history_length"
+            )
+
         self.add_noise = self.cfg.noise.add_noise
         noise_scales = self.cfg.noise.noise_scales
         noise_level = self.cfg.noise.noise_level
-        noise_vec[:3] = noise_scales.ang_vel * noise_level * self.obs_scales.ang_vel
-        noise_vec[3:6] = noise_scales.gravity * noise_level
-        noise_vec[6:9] = 0. # commands
-        noise_vec[9:21] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
-        noise_vec[21:33] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
-        noise_vec[33:45] = 0. # previous actions
-        noise_vec[45:46] =0.
-        noise_vec[46:47] = 0.
-        # if self.cfg.terrain.measure_heights:
-        #     noise_vec[47:234] = noise_scales.height_measurements* noise_level * self.obs_scales.height_measurements
-        return noise_vec
+        single_noise = torch.zeros(
+            self.cfg.env.num_single_observations,
+            dtype=self.obs_buf.dtype,
+            device=self.device,
+        )
+        # Layout одного кадра: ang_vel(3), gravity(3), commands(3),
+        # dof_pos(12), dof_vel(12), last_action(12), phase(2) = 47.
+        single_noise[0:3] = noise_scales.ang_vel * noise_level * self.obs_scales.ang_vel
+        single_noise[3:6] = noise_scales.gravity * noise_level
+        single_noise[6:9] = 0.0
+        single_noise[9:21] = noise_scales.dof_pos * noise_level * self.obs_scales.dof_pos
+        single_noise[21:33] = noise_scales.dof_vel * noise_level * self.obs_scales.dof_vel
+        single_noise[33:47] = 0.0
+        self.single_obs_noise_scale = single_noise
+        # Базовый класс ожидает vector размера полного observation. В нашем
+        # compute_observations он не применяется, но сохраняем корректный shape.
+        return single_noise.repeat(self.cfg.env.history_length)
 
     def step(self,actions):
         # actions = self.ref_dof_pos*4
@@ -116,19 +200,58 @@ class Go2(LeggedRobot):
         return self.obs_buf, self.privileged_obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def post_physics_step(self):
-        super().post_physics_step()
-        self.last_last_actions[:] = torch.clone(self.last_actions[:])
+        # Reward-функции foot_slip/feet_clearance читают rigid_state внутри
+        # super().post_physics_step(), поэтому tensor должен быть свежим заранее.
         self.gym.refresh_rigid_body_state_tensor(self.sim)
-        swing_mask = 1 - self._get_gait_phase().float()
-        self.swing_mask = swing_mask * (1 - self.standing_command_mask.unsqueeze(1))
-        self.stance_mask = 1 - self.swing_mask
 
+        # Базовый класс перезапишет last_actions в конце super(). Сохраняем
+        # a_(t-1), чтобы после reward корректно получить историю a_(t-2).
+        previous_actions = self.last_actions.clone()
+        super().post_physics_step()
+        self.last_last_actions[:] = previous_actions
+        # reset_idx вызывается внутри super(); нельзя переносить старую историю
+        # действий в только что сброшенный episode.
+        self.last_last_actions[self.reset_buf.bool()] = 0.0
+
+    def _post_physics_step_callback(self):
+        """Prepare shared contact state once before all reward functions."""
+        super()._post_physics_step_callback()
+
+        current = (
+            self.contact_forces[:, self.desired_contact_indices, 2]
+            > self.cfg.rewards.rear_contact_force
+        )
+        self.current_rear_contacts.copy_(current)
+        self.filtered_rear_contacts.copy_(torch.logical_or(current, self.last_rear_contacts))
+        self.rear_contact_changes.copy_(
+            torch.abs(current.float() - self.last_rear_contacts.float())
+        )
+        # Reward-функции только читают history; она обновляется ровно один раз,
+        # поэтому результат больше не зависит от порядка rewards в config.
+        self.last_rear_contacts.copy_(current)
+
+        self.standing_command_mask.copy_(
+            torch.norm(self.commands[:, :3], dim=1) <= self.cfg.rewards.command_dead
+        )
+        self.stance_mask = self._get_gait_phase()
+        self.swing_mask = ~self.stance_mask
         self.swing_mask_l = self.swing_mask[:, 0]
         self.swing_mask_r = self.swing_mask[:, 1]
+        # joint_pos reward (если его включить) должен видеть reference текущей,
+        # а не предыдущей фазы. Callback выполняется до compute_reward().
+        self.compute_ref_state()
 
     def reset_idx(self, env_ids):
         super().reset_idx(env_ids)
         self.last_last_actions[env_ids] = 0.0
+        self.obs_history[env_ids] = 0.0
+        self.history_needs_init[env_ids] = True
+        # История контактов не должна переходить из старого episode в новый.
+        self.current_rear_contacts[env_ids] = False
+        self.filtered_rear_contacts[env_ids] = False
+        self.last_rear_contacts[env_ids] = False
+        self.rear_contact_changes[env_ids] = 0.0
+        self.rear_feet_air_time[env_ids] = 0.0
 
     def _init_buffers(self):
         super()._init_buffers()
@@ -149,17 +272,52 @@ class Go2(LeggedRobot):
         )
 
         self.standing_command_mask = torch.zeros(
-            self.num_envs, dtype=torch.int64, device=self.device, requires_grad=False
+            self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False
         )
         self.ref_dof_pos = torch.zeros_like(self.dof_pos)
+        self.obs_history = torch.zeros(
+            self.num_envs,
+            self.cfg.env.history_length,
+            self.cfg.env.num_single_observations,
+            dtype=torch.float,
+            device=self.device,
+            requires_grad=False,
+        )
+        self.history_needs_init = torch.ones(
+            self.num_envs, dtype=torch.bool, device=self.device, requires_grad=False
+        )
         
 
         
     def _get_phase(self):
-        cycle_time = self.cfg.rewards.cycle_time  # Период цикла шага (1.6 с)
-        phase = (self.episode_length_buf * self.dt / cycle_time)  # Фаза цикла [0, 1] [num_envs]
-        # print(phase)
-        return phase  # [num_envs]
+        cycle_time = self.cfg.rewards.cycle_time
+        # Ограничение [0, 1) сохраняет точность sin/cos на длинных episodes.
+        return torch.remainder(self.episode_length_buf * self.dt / cycle_time, 1.0)
+
+    def _get_heading_frame_lin_vel(self):
+        """Linear velocity in the horizontal frame of the upright robot.
+
+        The standard base_lin_vel uses the complete base quaternion. At a pitch
+        of -90 degrees its local X component is approximately vertical, so it
+        cannot represent the user's forward/backward command correctly.
+        """
+        forward_world = quat_apply(self.base_quat, self.biped_forward_axis)
+        forward_xy = forward_world[:, :2]
+        forward_norm = torch.norm(forward_xy, dim=1, keepdim=True)
+        fallback = torch.zeros_like(forward_xy)
+        fallback[:, 0] = 1.0
+        forward_xy = torch.where(
+            forward_norm > 1e-4,
+            forward_xy / forward_norm.clamp(min=1e-4),
+            fallback,
+        )
+        lateral_xy = torch.stack((-forward_xy[:, 1], forward_xy[:, 0]), dim=1)
+        world_linear_velocity = self.root_states[:, 7:10]
+        forward_velocity = torch.sum(world_linear_velocity[:, :2] * forward_xy, dim=1)
+        lateral_velocity = torch.sum(world_linear_velocity[:, :2] * lateral_xy, dim=1)
+        return torch.stack(
+            (forward_velocity, lateral_velocity, world_linear_velocity[:, 2]), dim=1
+        )
 
     def _get_gait_phase(self):
         phase = self._get_phase()  # Фаза цикла [num_envs]
@@ -168,6 +326,10 @@ class Go2(LeggedRobot):
         gait_mask[:, 0] = sin_pos >= 0  # RR в опоре при sin ≥ 0 (фаза [0, 0.5])
         gait_mask[:, 1] = sin_pos < 0   # RL в опоре при sin < 0 (фаза [0.5, 1.0])
         gait_mask[torch.abs(sin_pos) < self.cfg.rewards.bias] = 1 # Двойная опора при |sin| < bias
+        # При нулевой команде робот должен стоять на обеих задних лапах, а не
+        # продолжать принудительный цикл шагов.
+        standing = torch.norm(self.commands[:, :3], dim=1) <= self.cfg.rewards.command_dead
+        gait_mask[standing] = True
         return gait_mask  # [num_envs, 2]
     
     def compute_ref_state(self):
@@ -176,88 +338,130 @@ class Go2(LeggedRobot):
         # print(sin_pos)
         sin_pos_l = sin_pos.clone()
         sin_pos_r = sin_pos.clone()
-        self.ref_dof_pos = torch.zeros_like(self.dof_pos)
+        # Reference содержит абсолютные joint positions. Для суставов, которым
+        # не задаём траекторию, правильный target — default, а не ноль.
+        self.ref_dof_pos = self.default_dof_pos.repeat(self.num_envs, 1)
         scale_1 = 2
-        scale_2 = 2 * scale_1
         # left foot stance phase set to default joint pos
         sin_pos_l[sin_pos_l > 0] = 0
-        self.ref_dof_pos[:, 6] = 0#sin_pos_l * scale_1
-        self.ref_dof_pos[:, 7] = 1.57
-        self.ref_dof_pos[:, 8] = sin_pos_l * scale_1
+        self.ref_dof_pos[:, self.rl_leg_indices[0]] = 0
+        self.ref_dof_pos[:, self.rl_leg_indices[1]] = 1.57
+        self.ref_dof_pos[:, self.rl_leg_indices[2]] = sin_pos_l * scale_1
         # right foot stance phase set to default joint pos
         sin_pos_r[sin_pos_r < 0] = 0
-        self.ref_dof_pos[:, 9] = 0#-sin_pos_r * scale_1
-        self.ref_dof_pos[:, 10] = 1.57
-        self.ref_dof_pos[:, 11] = -sin_pos_r * scale_1
+        self.ref_dof_pos[:, self.rr_leg_indices[0]] = 0
+        self.ref_dof_pos[:, self.rr_leg_indices[1]] = 1.57
+        self.ref_dof_pos[:, self.rr_leg_indices[2]] = -sin_pos_r * scale_1
         # Double support phase
-        self.ref_dof_pos[torch.abs(sin_pos) < self.cfg.rewards.bias] = 0
+        double_support = torch.abs(sin_pos) < self.cfg.rewards.bias
+        self.ref_dof_pos[double_support] = self.default_dof_pos
 
     
     def _reward_tracking_pitch(self):
-        # Tracking
         base_quat = self.root_states[:, 3:7]
         euler = get_euler_xyz(base_quat)
         episode_time_buf = self.episode_length_buf * self.dt
         pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
-        # pitch_command = torch.clip(pitch_command, self.cfg.commands.pitch, 0.)
-        # Clip для безопасности (между min being 0 и max=target)
-        pitch_command = torch.clamp(pitch_command, 0.0, self.cfg.commands.pitch)
+        # Target pitch отрицательный. min/max должны быть упорядочены, иначе
+        # torch.clamp(input, 0, -1.57) сразу возвращает -1.57 без stand-up ramp.
+        pitch_command = torch.clamp(
+            pitch_command,
+            min=min(0.0, self.cfg.commands.pitch),
+            max=max(0.0, self.cfg.commands.pitch),
+        )
         error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
-        # print(f"orient_grav{self.projected_gravity}")
-        # print(f"orient[0]{euler[:,0]}")
-        # print(f"orient[1]{euler[:,1]}")
-        # print(f"Diff {pitch_command-euler[:,1]}")
-        return torch.exp(-1*error/self.cfg.rewards.tracking_sigma)
+        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+
+    def _reward_tracking_lin_vel(self):
+        # Команды x/y заданы в горизонтальной системе вертикального робота.
+        heading_lin_vel = self._get_heading_frame_lin_vel()
+        error = torch.sum(
+            torch.square(self.commands[:, :2] - heading_lin_vel[:, :2]), dim=1
+        )
+        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+
+    def _reward_tracking_ang_vel(self):
+        # Поворот влево/вправо — вращение вокруг мировой вертикали. Компонента
+        # base_ang_vel[:, 2] после pitch=-90 относится уже к другой мировой оси.
+        yaw_rate_error = torch.square(self.commands[:, 2] - self.root_states[:, 12])
+        return torch.exp(-yaw_rate_error / self.cfg.rewards.tracking_sigma)
     
     def _reward_hip_pos(self):
-        hip_names = ["FR_hip_joint", "FL_hip_joint","RR_hip_joint", "RL_hip_joint"]
-        self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
-        for i, name in enumerate(hip_names):
-            self.hip_indices[i] = self.dof_names.index(name)
         error = torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
         return torch.exp(-error / self.cfg.rewards.tracking_sigma)  # [num_envs]
-        # hip_names = ["RR_hip_joint", "RL_hip_joint"]
-        # self.hip_indices = torch.zeros(len(hip_names), dtype=torch.long, device=self.device, requires_grad=False)
-        # for i, name in enumerate(hip_names):
-        #     self.hip_indices[i] = self.dof_names.index(name)
-        # return torch.sum(torch.square(self.dof_pos[:, self.hip_indices] - self.default_dof_pos[:, self.hip_indices]), dim=1)
     
    
     def _reward_base_height(self):
-        # Penalize base height
-        # height_error = self.root_states[:, 2] - self.cfg.rewards.base_height_target
-        # return torch.exp(-1* torch.square(height_error / self.cfg.rewards.tracking_sigma))
         base_height = torch.mean(self.root_states[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
-        # print(f"Base_height: {base_height}")
         error = base_height - self.cfg.rewards.base_height_target
-        # print(f"ERROR {error}")
-        rew = torch.exp(-1* torch.square(error / (self.cfg.rewards.tracking_sigma)))
-        # print(f"REW {rew}")
-        return rew
+        # Отдельная sigma имеет физический смысл в метрах и не связана с
+        # шириной velocity/orientation tracking rewards.
+        return torch.exp(-torch.square(error / self.cfg.rewards.base_height_sigma))
 
 
     def _reward_com_over_support(self):
-        base_pos = self.body_state_buffer[:, self.base_index, 0:3]
-        rr_pos = self.body_state_buffer[:, self.rr_foot_idx, 0:3]
-        rl_pos = self.body_state_buffer[:, self.rl_foot_idx, 0:3]
-        support_center = 0.5 * (rr_pos + rl_pos)
-        target_height = self.cfg.rewards.base_height_target
-        error = (0.4 * torch.square(base_pos[:, 0] - support_center[:, 0]) +
-                0.4 * torch.square(base_pos[:, 1] - support_center[:, 1]) +
-                0.8 * torch.square(base_pos[:, 2] - target_height))
-        return torch.exp(-8.0 * error)
+        """Reward CoM projection inside the support region of contacting rear feet."""
+        # rigid_state содержит pose link frame. Настоящий CoM каждого звена
+        # смещён на prop.com, поэтому переносим local COM offset в мировой frame.
+        body_positions = self.rigid_state[:, :, 0:3]
+        body_quaternions = self.rigid_state[:, :, 3:7]
+        body_com_positions = body_positions + quat_apply(
+            body_quaternions, self.body_local_coms
+        )
+        total_mass = self.body_masses.sum(dim=1, keepdim=True)
+        com = torch.sum(
+            body_com_positions * self.body_masses.unsqueeze(2), dim=1
+        ) / total_mass
+
+        rear_xy = self.rigid_state[:, self.desired_contact_indices, 0:2]
+        rr_xy = rear_xy[:, 0]
+        rl_xy = rear_xy[:, 1]
+        support_segment = rl_xy - rr_xy
+        segment_length_sq = torch.sum(torch.square(support_segment), dim=1).clamp(
+            min=1e-8
+        )
+        segment_parameter = torch.sum(
+            (com[:, :2] - rr_xy) * support_segment, dim=1
+        ) / segment_length_sq
+        segment_parameter = torch.clamp(segment_parameter, 0.0, 1.0)
+        closest_on_segment = rr_xy + segment_parameter.unsqueeze(1) * support_segment
+
+        contact_weights = self.current_rear_contacts.float()
+        contact_count = torch.sum(contact_weights, dim=1)
+        closest_single_foot = torch.sum(
+            rear_xy * contact_weights.unsqueeze(2), dim=1
+        ) / contact_count.unsqueeze(1).clamp(min=1.0)
+        both_in_contact = contact_count == 2
+        closest_support_point = torch.where(
+            both_in_contact.unsqueeze(1), closest_on_segment, closest_single_foot
+        )
+
+        distance_to_support = torch.norm(com[:, :2] - closest_support_point, dim=1)
+        # Стопы имеют ненулевую площадь. Внутри margin reward максимален,
+        # снаружи плавно убывает с отдельной sigma в метрах.
+        outside_distance = torch.clamp(
+            distance_to_support - self.cfg.rewards.com_support_margin, min=0.0
+        )
+        normalized_error = outside_distance / self.cfg.rewards.com_support_sigma
+        reward = torch.exp(-torch.square(normalized_error))
+        # В полёте support region не существует, поэтому положительного бонуса нет.
+        return reward * (contact_count > 0).float()
     
 
     def _reward_rear_feet_contact_and_air(self):
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
-        contact_changes = torch.abs(contact.float() - self.last_contacts.float())  # [num_envs, 2]
-        self.last_contacts = contact
+        contact = self.current_rear_contacts
         gait_mask = self._get_gait_phase()  # [num_envs, 2]
         contact_reward = torch.sum(1.0 * contact * gait_mask, dim=1)  # Только текущие контакты
-        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)  # Увеличен вес
-        contact_change_penalty = -0.9 * torch.sum(contact_changes, dim=1)  # Штраф за частые переключения
-        undesired_contact_penalty = -15 * torch.sum(self.contact_forces[:, self.undesired_contact_indices, 2] > 1.0, dim=1)
-        return contact_reward + swing_reward + contact_change_penalty + undesired_contact_penalty 
+        swing_reward = torch.sum(1.0 * (~contact) * (~gait_mask), dim=1)
+        undesired_contact = (
+            torch.norm(self.contact_forces[:, self.undesired_contact_indices, :], dim=2)
+            > self.cfg.rewards.undesired_contact_force
+        )
+        undesired_contact_penalty = -15.0 * torch.sum(undesired_contact, dim=1)
+        # Каждый нормальный шаг содержит два переключения контакта. Отдельный
+        # penalty за любое переключение конфликтовал с gait mask, поэтому его
+        # убираем; несвоевременный контакт уже уменьшает match reward.
+        return contact_reward + swing_reward + undesired_contact_penalty
     
 
     def _reward_smoothness(self):
@@ -276,7 +480,8 @@ class Go2(LeggedRobot):
         and if the movement direction matches the command.
         """
         # Calculate the absolute value of speed and command for comparison
-        absolute_speed = torch.abs(self.base_lin_vel[:, 0])
+        forward_velocity = self._get_heading_frame_lin_vel()[:, 0]
+        absolute_speed = torch.abs(forward_velocity)
         absolute_command = torch.abs(self.commands[:, 0])
 
         # Define speed criteria for desired range
@@ -286,10 +491,10 @@ class Go2(LeggedRobot):
 
         # Check if the speed and command directions are mismatched
         sign_mismatch = torch.sign(
-            self.base_lin_vel[:, 0]) != torch.sign(self.commands[:, 0])
+            forward_velocity) != torch.sign(self.commands[:, 0])
 
         # Initialize reward tensor
-        reward = torch.zeros_like(self.base_lin_vel[:, 0])
+        reward = torch.zeros_like(forward_velocity)
         # Assign rewards based on conditions
         # Speed too low
         reward[speed_too_low] = -1.0
@@ -317,23 +522,14 @@ class Go2(LeggedRobot):
         checking the first contact with the ground after being in the air. The air time is
         limited to a maximum value for reward calculation.
         """
-        # Контакты задних лап (RR, RL)
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 50.0  # [num_envs, 2]
-        # print(f"contact={contact}")
-        
-        # Reward long steps
-
-        # print(contact)
-        # print(self.last_contacts)
-        contact_filt = torch.logical_or(contact, self.last_contacts) 
-        self.last_contacts = contact
-        first_contact = (self.feet_air_time > 0.) * contact_filt
-        self.feet_air_time += self.dt
-        rew_airTime = torch.sum((self.feet_air_time - 0.5) * first_contact, dim=1) # reward only on first contact with the ground
+        # Contact history подготовлена один раз в callback; reward не изменяет
+        # shared state и потому не зависит от порядка вызова reward-функций.
+        contact_filt = self.filtered_rear_contacts
+        first_contact = (self.rear_feet_air_time > 0.0) * contact_filt
+        self.rear_feet_air_time += self.dt
+        rew_airTime = torch.sum((self.rear_feet_air_time - 0.5) * first_contact, dim=1)
         rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1 #no reward for zero command
-        self.feet_air_time *= ~contact_filt
-            # Отладка
-        # print(f"FeetAirTime2: reward={rew_airTime.mean()}, air_time={self.feet_air_time.mean()}")
+        self.rear_feet_air_time *= ~contact_filt
         return rew_airTime
     
     def _reward_foot_slip(self):
@@ -342,39 +538,36 @@ class Go2(LeggedRobot):
         and the speed of the feet. A contact threshold is used to determine if the foot is in contact
         with the ground. The speed of the foot is calculated and scaled by the contact condition.
         """
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 5.0
-        # print(f"Contact{contact}")
-        # print(f"rigid_body_state {self.rigid_body_state }")
+        contact = (
+            self.contact_forces[:, self.desired_contact_indices, 2]
+            > self.cfg.rewards.slip_contact_force
+        )
         foot_speed_norm = torch.norm(self.rigid_state[:, self.desired_contact_indices, 7:9], dim=2)
-        # print(f"foot_speed_norm{foot_speed_norm}")
-        rew = torch.sqrt(foot_speed_norm)
-        # print(f"rew{rew}")
-        rew *= contact
-        # print(f"rew* {torch.sum(rew, dim=1)}")
-        #print(f"Reward for feet slip (env 0): {rew}")
-        return torch.sum(rew, dim=1)
+        # Квадрат скорости гладкий около нуля и имеет понятное направление:
+        # больше проскальзывание -> больше положительный raw penalty.
+        slip_penalty = torch.square(foot_speed_norm) * contact
+        return torch.sum(slip_penalty, dim=1)
     def _reward_feet_clearance(self):#鼓励抬脚高度
         """
         Поощряет подъём задних лап (RR, RL) на целевую высоту в фазе свинга для ритмичной походки.
         Использует фиксированную целевую высоту (target_foot_height) и экспоненциальную награду.
         Сбрасывает высоту при контакте и применяется только при движении (lin_vel > 0.1).
         """
-        # Высота лап относительно земли
-        self.feet_height = self.rigid_state[:, self.desired_contact_indices, 2] - 0.02  # [num_envs, 2]
-        # print(f"Height {self.feet_height}")
-        contact = self.contact_forces[:, self.desired_contact_indices, 2] > 1.0  # [num_envs, 2]
-        self.feet_height *= ~contact  # Сброс высоты при контакте
+        # Текущий terrain = plane: env origin задаёт уровень поверхности.
+        # Вычитаем радиус стопы, чтобы reward работал с нижней точкой стопы.
+        ground_height = self.env_origins[:, 2].unsqueeze(1)
+        feet_height = (
+            self.rigid_state[:, self.desired_contact_indices, 2]
+            - ground_height
+            - self.cfg.rewards.foot_radius
+        )
         swing_mask = torch.logical_not(self._get_gait_phase())  # [num_envs, 2]
-        target_height = self.cfg.rewards.target_foot_height  # Фиксированная высота (например, 0.1 м)
-        # Экспоненциальная награда за близость к целевой высоте в свинге
-        error = torch.abs(self.feet_height - target_height)  # [num_envs, 2]
-        # print(f" height { self.feet_height }")
-        # print(error)
-        rew = torch.exp(-error * swing_mask )  # [num_envs, 2]
-        reward = torch.sum(rew, dim=1)  # [num_envs]
-        # Награда только при движении
-        # print(f"RearFeetClearance: reward={reward.mean()}, feet_height={self.feet_height.mean()}, target_height={target_height}, swing_mask={swing_mask.float().mean()}, moving={moving.float().mean()}, contact={contact.float().mean()}")
-        return reward
+        error = (feet_height - self.cfg.rewards.target_foot_height) / self.cfg.rewards.clearance_sigma
+        # Маску умножаем СНАРУЖИ exp. Иначе в stance exp(0)=1 давал
+        # постоянный максимальный бонус независимо от высоты лапы.
+        reward_per_foot = torch.exp(-torch.square(error)) * swing_mask.float()
+        moving = torch.norm(self.commands[:, :3], dim=1) > self.cfg.rewards.command_dead
+        return torch.sum(reward_per_foot, dim=1) * moving
     
     # def _reward_feet_contact_forces(self):
     #     return torch.sum(

@@ -3,7 +3,12 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class Go2RoughCfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        num_observations = 47
+        # Один кадр содержит только доступные реальному роботу сигналы.
+        num_single_observations = 47
+        # Меняйте только history_length; общий размер actor input пересчитается.
+        # history_length=1 отключает историю, 5 кадров при dt=0.02 дают 0.08 с.
+        history_length = 5
+        num_observations = num_single_observations * history_length
         episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
@@ -84,12 +89,28 @@ class Go2RoughCfg(LeggedRobotCfg):
         dt=0.005
 
     class rewards(LeggedRobotCfg.rewards):
+        # PPO получает градиент через advantage, а не через производную reward.
+        # Обрезаем только отрицательную *промежуточную* сумму: это не даёт
+        # ранним падениям доминировать над обучением. Termination со scale=-10
+        # добавляется базовым классом уже ПОСЛЕ clip (фактически -0.2 за policy
+        # step при dt=0.02), поэтому падение всё равно наказано.
+        only_positive_rewards = True
         tracking_sigma = 0.5
-        base_height_target = 0.50 # Match init_state pos
+        base_height_target = 0.50
+        # Separate parameter fixes accidental coupling while 0.50 preserves the
+        # old reward curve. Narrow it only after plotting/benchmarking the reward.
+        base_height_sigma = 0.50  # [m]
         cycle_time = 0.25 #0.25
         bias = 0.2#0.1
         command_dead =0.1
         target_foot_height = 0.05
+        clearance_sigma = 0.03  # [m]
+        foot_radius = 0.02  # [m], URDF collision radius
+        rear_contact_force = 50.0  # [N]
+        slip_contact_force = 5.0  # [N]
+        undesired_contact_force = 5.0  # [N], robust to small PhysX noise
+        com_support_margin = 0.03  # [m], effective support area around rear feet
+        com_support_sigma = 0.08  # [m], decay outside the support area
         max_contact_force = 125.
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2.5# Disable for standing task
@@ -101,6 +122,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             foot_slip = -2
             low_speed = 0.005
             rear_feet_contact_and_air = 4
+            com_over_support = 1.0
             smoothness = -0.01
             torques = -5e-4
             dof_vel = -5e-5
@@ -149,10 +171,13 @@ class Go2RoughCfg(LeggedRobotCfg):
         max_curriculum = 1.
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 10. # time before command are changed[s]
-        heading_command = True # if true: compute ang vel command from heading error
+        # Для вертикального робота body-X почти вертикальна, поэтому стандартный
+        # heading по проекции body-X вырождается. Используем прямую yaw-rate command.
+        heading_command = False
         class ranges(LeggedRobotCfg.commands.ranges):
             lin_vel_x = [-0.3, 0.3]  # Поощряем движение вперёд
-            lin_vel_y = [-0.0, 0.0] # Небольшое боковое движение
+            # Ненулевой диапазон необходим для команд движения влево/вправо.
+            lin_vel_y = [-0.3, 0.3]
             ang_vel_yaw = [-0.2, 0.2]
             heading = [-3.14, 3.14]
 
