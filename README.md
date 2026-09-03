@@ -30,6 +30,63 @@ Project website: https://leggedrobotics.github.io/legged_gym/
 Paper: https://arxiv.org/abs/2109.11978
 
 ### Installation ###
+
+#### Conda environment for this repository
+
+The project uses the legacy NVIDIA Isaac Gym stack and therefore requires
+Python 3.8. The commands below create an isolated environment named
+`workshop_gym` with the versions used by this repository.
+
+```bash
+source /home/ruben/miniconda3/etc/profile.d/conda.sh
+conda create -n workshop_gym python=3.8 pip=24.2 -y
+conda activate workshop_gym
+
+python -m pip install torch==1.13.0+cu116 \
+  --extra-index-url https://download.pytorch.org/whl/cu116
+python -m pip install "numpy<1.24" tensorboard matplotlib
+```
+
+Isaac Gym Preview 4 is included in this repository under `isaacgym/`; no
+separate download or path variable is required. Install it from the repository
+root:
+
+```bash
+cd /home/ruben/go2_deploy/workshop_legged_gym
+python -m pip install -e ./isaacgym/python
+```
+
+Install the PPO implementation and this repository in editable mode:
+
+```bash
+cd /home/ruben/go2_deploy/workshop_legged_gym
+python -m pip install -e ./rsl_rl
+python -m pip install -e .
+```
+
+Check the installation (Isaac Gym must be imported before PyTorch):
+
+```bash
+python -c "import isaacgym; import torch; import legged_gym, rsl_rl; print(torch.__version__)"
+```
+
+Start headless training:
+
+```bash
+python legged_gym/scripts/train.py --task=go2_stand --headless
+# or:
+python legged_gym/scripts/train.py --task=go2_walk --headless
+```
+
+View training metrics in TensorBoard:
+
+```bash
+tensorboard --logdir ./logs --port 6006
+```
+
+Open [http://localhost:6006](http://localhost:6006) in a browser. Stop
+TensorBoard with `Ctrl+C`.
+
 1. Create a new python virtual env with python 3.6, 3.7 or 3.8 (3.8 recommended)
 2. Install pytorch. Follow https://pytorch.org/get-started/locally/
 3. Install Isaac Gym
