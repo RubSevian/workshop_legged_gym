@@ -97,9 +97,14 @@ class Go2RoughCfg(LeggedRobotCfg):
         only_positive_rewards = True
         tracking_sigma = 0.5
         base_height_target = 0.50
-        # Separate parameter fixes accidental coupling while 0.50 preserves the
-        # old reward curve. Narrow it only after plotting/benchmarking the reward.
-        base_height_sigma = 0.50  # [m]
+        # At a 0.15 m error the reward is exp(-1) ~= 0.368. This makes height
+        # tracking meaningful without turning small terrain/contact motion into
+        # an almost-binary penalty.
+        base_height_sigma = 0.15  # [m]
+        # Quaternion-derived projected-gravity tracking is yaw invariant. Roll
+        # is deliberately softer so lateral locomotion may lean the body.
+        tracking_orientation_sigma = 0.25
+        tracking_roll_weight = 0.25
         # Baseline v1: exactly 20 policy steps per gait cycle (0.40 / 0.02).
         cycle_time = 0.40
         bias = 0.2#0.1
@@ -111,6 +116,10 @@ class Go2RoughCfg(LeggedRobotCfg):
         undesired_contact_force = 5.0  # [N], robust to small PhysX noise
         com_support_margin = 0.03  # [m], effective support area around rear feet
         com_support_sigma = 0.08  # [m], decay outside the support area
+        # Allow a natural split stance, but stop the policy from enlarging the
+        # support segment by putting one rear foot excessively far forward.
+        max_rear_foot_sagittal_separation = 0.28  # [m]
+        rear_foot_separation_sigma = 0.10  # [m], smooth excess decay
         max_contact_force = 125.
         class scales(LeggedRobotCfg.rewards.scales):
             tracking_lin_vel = 2.5# Disable for standing task
@@ -123,6 +132,7 @@ class Go2RoughCfg(LeggedRobotCfg):
             low_speed = 0.005
             rear_feet_contact_and_air = 4
             com_over_support = 1.0
+            rear_foot_separation = -2.0
             smoothness = -0.01
             torques = -5e-4
             dof_vel = -5e-5
@@ -164,7 +174,10 @@ class Go2RoughCfg(LeggedRobotCfg):
 
 
     class commands(LeggedRobotCfg.commands):
-        pitch = -1.61
+        # These values define the desired orientation. The reward converts them
+        # to a target quaternion/projected gravity and never reads Euler angles
+        # from the simulated base orientation.
+        pitch = -1.57
         roll = 0.
         standup_duration = 1.25
         standup_transition_duration = 0.30

@@ -88,35 +88,19 @@ $$
 
 ### Ориентация корпуса (`tracking_pitch`)
 
-Задуманный target во время вставания:
-
-$$
-\theta^*(t)=\operatorname{clip}\left(
-\frac{t}{t_s}\theta_f,
-\min(0,\theta_f),
-\max(0,\theta_f)
-\right),
-$$
-
-где $\theta_f=-1.57$ рад и $t_s=1.25$ с. Награда:
+Актуальная реализация не извлекает Euler pitch/roll из состояния робота.
+Параметры target pitch/roll используются только для построения целевого
+кватерниона, после чего ошибка считается между текущим и целевым projected
+gravity:
 
 $$
 r_\text{pitch}=\exp\left(
--\frac{(\theta^*-\theta)^2+(\rho^*-\rho)^2}{\sigma}
+-\frac{\Delta g_x^2+0.25\Delta g_y^2+\Delta g_z^2}{\sigma}
 \right).
 $$
 
-Вес $5$, коэффициент за шаг $0.1$.
-
-**P0:** фактический вызов `torch.clamp(pitch_command, 0.0, -1.57)` имеет `min > max`. В PyTorch это превращает весь результат в `-1.57`; плавного вставания нет. Корректная строка:
-
-```python
-pitch_command = torch.clamp(
-    pitch_command,
-    min=min(0.0, self.cfg.commands.pitch),
-    max=max(0.0, self.cfg.commands.pitch),
-)
-```
+Вес $5$, коэффициент за шаг $0.1$. Меньший вес lateral-компоненты разрешает
+умеренный наклон корпуса при движении в сторону.
 
 ### Положение hip joints (`hip_pos`)
 

@@ -98,20 +98,19 @@ $$
 
 ### Ориентация `tracking_pitch`
 
-Target pitch плавно изменяется от нуля до $\theta_f=-1.57$:
-
-$$
-\theta^*(t)=\operatorname{clip}
-\left(\frac{t\theta_f}{T_{\mathrm{stand}}},\min(0,\theta_f),\max(0,\theta_f)\right).
-$$
-
-Для текущих Euler pitch $\theta$ и roll $\rho$:
+Target pitch плавно изменяется от нуля до $\theta_f=-1.61$. Он используется
+только для построения целевого кватерниона и target projected gravity; текущие
+Euler-углы корпуса не вычисляются. Поэтому reward не зависит от yaw и не имеет
+сингулярности около вертикальной стойки:
 
 $$
 r_{\mathrm{pitch}}=\exp\left(
--\frac{(\theta^*-\theta)^2+(\rho^*-\rho)^2}{\sigma_{\mathrm{tracking}}}
+-\frac{\Delta g_x^2+w_y\Delta g_y^2+\Delta g_z^2}
+{\sigma_{\mathrm{orientation}}}
 \right).
 $$
+
+Текущий $w_y=0.25$ смягчает штраф за небольшой боковой наклон.
 
 ### Линейная скорость `tracking_lin_vel`
 
@@ -170,14 +169,27 @@ $$
 $$
 r_{\mathrm{CoM}}=\exp\left[-\left(
 \frac{e_{\mathrm{support}}}{\sigma_{\mathrm{support}}}
-\right)^2\right]\mathbb{1}[N_{\mathrm{contact}}>0].
+\right)^2\right]q_s\mathbb{1}[N_{\mathrm{contact}}>0].
 $$
+
+Чтобы policy не увеличивала опорный отрезок чрезмерным «шпагатом», вычисляется
+продольное расстояние между задними стопами $s$. После допустимых `0.28 м`:
+
+$$
+e_s=\max(s-0.28,0),\qquad
+q_s=\exp[-(e_s/0.10)^2].
+$$
+
+Тот же excess создаёт отдельный ограниченный penalty
+$1-q_s\in[0,1]$. Боковое расстояние между стопами не штрафуется.
 
 Текущие параметры:
 
 ```python
 com_support_margin = 0.03  # м
 com_support_sigma = 0.08   # м
+max_rear_foot_sagittal_separation = 0.28  # м
+rear_foot_separation_sigma = 0.10         # м
 ```
 
 Внутри опорной области reward равен 1. На расстоянии одной sigma за её границей
@@ -325,7 +337,7 @@ pitch, CoM-support, rear gait и clearance. Дополнительно Baseline 
 - `baseline_total_reward_per_step`;
 - `front_feet_contact_rate`, `front_feet_contact_penalty_raw`;
 - `mean_abs_torque`, `mean_abs_action`;
-- `com_support_distance_m`;
+- `com_support_distance_m`, `rear_foot_sagittal_separation_m`;
 - `forward_velocity_abs_error_m_s`, `lateral_velocity_abs_error_m_s`;
 - `episode_length_s`, `terminated_count`, `termination_fraction`.
 
@@ -339,6 +351,7 @@ pitch, CoM-support, rear gait и clearance. Дополнительно Baseline 
 | `hip_pos` | 3.0 | 0.06 |
 | `base_height` | 3.0 | 0.06 |
 | `com_over_support` | 1.0 | 0.02 |
+| `rear_foot_separation` | -2.0 | -0.04 |
 | `feet_clearance` | 1.0 | 0.02 |
 | `foot_slip` | -2.0 | -0.04 |
 | `low_speed` | 0.005 | 0.0001 |

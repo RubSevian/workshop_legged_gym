@@ -1,7 +1,11 @@
-from legged_gym.utils.isaacgym_utils import get_euler_xyz
 from legged_gym.envs import LeggedRobot
 from isaacgym import gymtorch
-from isaacgym.torch_utils import quat_apply, torch_rand_float
+from isaacgym.torch_utils import (
+    quat_apply,
+    quat_from_euler_xyz,
+    quat_rotate_inverse,
+    torch_rand_float,
+)
 
 import torch
 
@@ -407,6 +411,7 @@ class Go2(LeggedRobot):
             "mean_abs_torque",
             "mean_abs_action",
             "com_support_distance_m",
+            "rear_foot_sagittal_separation_m",
             "forward_velocity_abs_error_m_s",
             "lateral_velocity_abs_error_m_s",
         )
@@ -491,13 +496,8 @@ class Go2(LeggedRobot):
             )
             self.commands[env_ids, 2] *= yaw_active
 
-    def _get_heading_frame_lin_vel(self):
-        """Linear velocity in the horizontal frame of the upright robot.
-
-        The standard base_lin_vel uses the complete base quaternion. At a pitch
-        of -90 degrees its local X component is approximately vertical, so it
-        cannot represent the user's forward/backward command correctly.
-        """
+    def _get_biped_forward_xy(self):
+        """Return the normalized world-XY forward axis of the upright robot."""
         forward_world = quat_apply(self.base_quat, self.biped_forward_axis)
         forward_xy = forward_world[:, :2]
         forward_norm = torch.norm(forward_xy, dim=1, keepdim=True)
@@ -508,12 +508,35 @@ class Go2(LeggedRobot):
             forward_xy / forward_norm.clamp(min=1e-4),
             fallback,
         )
+        return forward_xy
+
+    def _get_heading_frame_lin_vel(self):
+        """Linear velocity in the horizontal frame of the upright robot.
+
+        The standard base_lin_vel uses the complete base quaternion. At a pitch
+        of -90 degrees its local X component is approximately vertical, so it
+        cannot represent the user's forward/backward command correctly.
+        """
+        forward_xy = self._get_biped_forward_xy()
         lateral_xy = torch.stack((-forward_xy[:, 1], forward_xy[:, 0]), dim=1)
         world_linear_velocity = self.root_states[:, 7:10]
         forward_velocity = torch.sum(world_linear_velocity[:, :2] * forward_xy, dim=1)
         lateral_velocity = torch.sum(world_linear_velocity[:, :2] * lateral_xy, dim=1)
         return torch.stack(
             (forward_velocity, lateral_velocity, world_linear_velocity[:, 2]), dim=1
+        )
+
+    def _get_rear_foot_sagittal_separation(self):
+        """Absolute front/back separation of rear feet in the heading frame."""
+        rear_xy = self.rigid_state[:, self.desired_contact_indices, 0:2]
+        foot_delta = rear_xy[:, 1] - rear_xy[:, 0]
+        return torch.abs(torch.sum(foot_delta * self._get_biped_forward_xy(), dim=1))
+
+    def _get_rear_foot_separation_excess(self):
+        separation = self._get_rear_foot_sagittal_separation()
+        return torch.clamp(
+            separation - self.cfg.rewards.max_rear_foot_sagittal_separation,
+            min=0.0,
         )
 
     def _get_gait_phase(self):
@@ -555,21 +578,31 @@ class Go2(LeggedRobot):
 
     
     def _reward_tracking_pitch(self):
-        # TODO baseline ablation: replace Euler pitch/roll reward with a
-        # quaternion/projected-gravity orientation reward.
-        base_quat = self.root_states[:, 3:7]
-        euler = get_euler_xyz(base_quat)
+        """Track stand-up tilt without Euler singularities or constraining yaw."""
         episode_time_buf = self.episode_length_buf * self.dt
         pitch_command = episode_time_buf * self.cfg.commands.pitch / self.cfg.commands.standup_duration
-        # Target pitch отрицательный. min/max должны быть упорядочены, иначе
-        # torch.clamp(input, 0, -1.57) сразу возвращает -1.57 без stand-up ramp.
         pitch_command = torch.clamp(
             pitch_command,
             min=min(0.0, self.cfg.commands.pitch),
             max=max(0.0, self.cfg.commands.pitch),
         )
-        error = torch.square(pitch_command - euler[:, 1]) + torch.square(self.cfg.commands.roll - euler[:, 0])
-        return torch.exp(-error / self.cfg.rewards.tracking_sigma)
+        target_roll = torch.full_like(pitch_command, self.cfg.commands.roll)
+        target_yaw = torch.zeros_like(pitch_command)
+        target_quat = quat_from_euler_xyz(
+            target_roll, pitch_command, target_yaw
+        )
+        target_gravity = quat_rotate_inverse(target_quat, self.gravity_vec)
+        gravity_error = self.projected_gravity - target_gravity
+
+        # Body Y is the lateral gravity component. Give it a lower weight so a
+        # controlled side lean does not compete strongly with velocity tracking.
+        error = (
+            torch.square(gravity_error[:, 0])
+            + self.cfg.rewards.tracking_roll_weight
+            * torch.square(gravity_error[:, 1])
+            + torch.square(gravity_error[:, 2])
+        )
+        return torch.exp(-error / self.cfg.rewards.tracking_orientation_sigma)
 
     def compute_reward(self):
         """Compute training reward and accumulate non-shaping debug metrics."""
@@ -594,6 +627,9 @@ class Go2(LeggedRobot):
             torch.abs(self.actions), dim=1
         )
         self.baseline_metric_sums["com_support_distance_m"] += self.com_support_distance
+        self.baseline_metric_sums["rear_foot_sagittal_separation_m"] += (
+            self._get_rear_foot_sagittal_separation()
+        )
         self.baseline_metric_sums["forward_velocity_abs_error_m_s"] += torch.abs(
             self.commands[:, 0] - heading_velocity[:, 0]
         )
@@ -676,8 +712,22 @@ class Go2(LeggedRobot):
         )
         normalized_error = outside_distance / self.cfg.rewards.com_support_sigma
         reward = torch.exp(-torch.square(normalized_error))
+        # A long split stance used to enlarge the support segment and make this
+        # reward easier. Remove that incentive smoothly past the allowed range.
+        separation_excess = self._get_rear_foot_separation_excess()
+        separation_quality = torch.exp(-torch.square(
+            separation_excess / self.cfg.rewards.rear_foot_separation_sigma
+        ))
         # В полёте support region не существует, поэтому положительного бонуса нет.
-        return reward * (contact_count > 0).float()
+        return reward * separation_quality * (contact_count > 0).float()
+
+    def _reward_rear_foot_separation(self):
+        """Bounded penalty for an excessive front/back split of the rear feet."""
+        normalized_excess = (
+            self._get_rear_foot_separation_excess()
+            / self.cfg.rewards.rear_foot_separation_sigma
+        )
+        return 1.0 - torch.exp(-torch.square(normalized_excess))
     
 
     def _reward_rear_feet_contact_and_air(self):

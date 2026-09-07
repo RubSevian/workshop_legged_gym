@@ -101,6 +101,7 @@ def evaluate(args):
         env_cfg.domain_rand.randomize_link_mass = False
         env_cfg.domain_rand.randomize_base_com = False
         env_cfg.domain_rand.randomize_pd_gains = False
+        env_cfg.domain_rand.randomize_motor_strength = False
         env_cfg.domain_rand.randomize_motor_zero_offset = False
         env_cfg.domain_rand.push_robots = False
 

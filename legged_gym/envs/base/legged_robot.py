@@ -126,6 +126,20 @@ class LeggedRobot(BaseTask):
         self.compute_reward()
         env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
         self.reset_idx(env_ids)
+        # reset_idx() writes new root states directly into the acquired tensor.
+        # Refresh derived, body-frame quantities before the first observation
+        # of the new episode; otherwise they still describe the terminal state.
+        if len(env_ids) > 0:
+            self.base_quat[env_ids] = self.root_states[env_ids, 3:7]
+            self.base_lin_vel[env_ids] = quat_rotate_inverse(
+                self.base_quat[env_ids], self.root_states[env_ids, 7:10]
+            )
+            self.base_ang_vel[env_ids] = quat_rotate_inverse(
+                self.base_quat[env_ids], self.root_states[env_ids, 10:13]
+            )
+            self.projected_gravity[env_ids] = quat_rotate_inverse(
+                self.base_quat[env_ids], self.gravity_vec[env_ids]
+            )
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
@@ -179,6 +193,7 @@ class LeggedRobot(BaseTask):
 
         # reset buffers
         self.last_actions[env_ids] = 0.
+        self.actions[env_ids] = 0.
         self.last_dof_vel[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
