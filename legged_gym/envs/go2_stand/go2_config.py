@@ -45,7 +45,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         
 
     class init_state(LeggedRobotCfg.init_state):
-        pos = [0.0, 0.0, 0.35]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.25]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             'FL_hip_joint': 0,  # [rad]
             'RL_hip_joint': 0,  # [rad]
@@ -164,7 +164,7 @@ class Go2RoughCfg(LeggedRobotCfg):
 
 
     class commands(LeggedRobotCfg.commands):
-        pitch = -1.57
+        pitch = -1.61
         roll = 0.
         standup_duration = 1.25
         standup_transition_duration = 0.30
@@ -191,7 +191,7 @@ class Go2RoughCfg(LeggedRobotCfg):
         debug_randomization = False
         debug_randomization_envs = 3
         randomize_friction = True
-        friction_range = [0.7, 1.15]
+        friction_range = [0.5, 1.15]
         randomize_base_mass = True
         added_base_mass_range = [-2,2]
         push_robots = True
@@ -199,13 +199,18 @@ class Go2RoughCfg(LeggedRobotCfg):
         max_push_vel_xy = 0.5
         max_push_ang_vel = 0.25
         randomize_link_mass = True
-        multiplied_link_mass_range = [0.9, 1.1]
+        multiplied_link_mass_range = [0.8, 1.2]
 
         randomize_base_com = True
         added_base_com_range = [-0.03, 0.03]
         randomize_pd_gains = True
-        stiffness_multiplier_range = [0.9, 1.1]  
-        damping_multiplier_range = [0.9, 1.1]    
+        stiffness_multiplier_range = [0.8, 1.2]
+        damping_multiplier_range = [0.7, 1.3]
+
+        # Per-joint actuator strength is sampled once per episode and scales
+        # the PD torque before the physical torque limit is applied.
+        randomize_motor_strength = True
+        motor_strength_range = [0.85, 1.15]
 
 
         randomize_motor_zero_offset = True

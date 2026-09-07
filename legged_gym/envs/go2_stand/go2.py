@@ -91,7 +91,7 @@ class Go2(LeggedRobot):
         probe_dof_vel = torch.full_like(self.dof_vel, 0.1)
         probe_torques = self._compute_p_control_torques(
             probe_actions_scaled, probe_dof_pos, probe_dof_vel
-        )
+        ) * self.motor_strengths
 
         print("[go2_stand] Baseline v1 domain-randomization sample:")
         for env_id in range(count):
@@ -108,6 +108,9 @@ class Go2(LeggedRobot):
                 f"friction={friction_value} "
                 f"kp_multiplier_mean={self.p_gains_multiplier[env_id].mean().item():.4f} "
                 f"kd_multiplier_mean={self.d_gains_multiplier[env_id].mean().item():.4f} "
+                f"motor_strength_min={self.motor_strengths[env_id].min().item():.4f} "
+                f"motor_strength_max={self.motor_strengths[env_id].max().item():.4f} "
+                f"motor_strength_mean={self.motor_strengths[env_id].mean().item():.4f} "
                 f"zero_offset_mean={self.motor_zero_offsets[env_id].mean().item():.6f} "
                 f"probe_torque_mean={probe_torques[env_id].mean().item():.4f}"
             )
@@ -136,6 +139,15 @@ class Go2(LeggedRobot):
                     * probe_dof_vel
                 )
                 require_variation("PD-randomized probe torque", pd_only_probe)
+            if self.cfg.domain_rand.randomize_motor_strength:
+                require_variation("motor strengths", self.motor_strengths)
+                # Same q, dq, action, Kp and Kd: only motor strength varies.
+                strength_only_probe = (
+                    -self.d_gains.unsqueeze(0)
+                    * probe_dof_vel
+                    * self.motor_strengths
+                )
+                require_variation("motor-strength probe torque", strength_only_probe)
             if self.cfg.domain_rand.randomize_motor_zero_offset:
                 require_variation("motor zero offsets", self.motor_zero_offsets)
                 zero_only_probe = (
@@ -147,6 +159,7 @@ class Go2(LeggedRobot):
             randomizes_controller = (
                 self.cfg.domain_rand.randomize_pd_gains
                 or self.cfg.domain_rand.randomize_motor_zero_offset
+                or self.cfg.domain_rand.randomize_motor_strength
             )
             if randomizes_controller and torch.allclose(
                 probe_torques[:count], probe_torques[0].expand(count, -1)

@@ -78,6 +78,15 @@ python legged_gym/scripts/train.py --task=go2_stand --headless
 python legged_gym/scripts/train.py --task=go2_walk --headless
 ```
 
+Play the latest `go2_stand` policy with the Isaac Gym viewer:
+
+```bash
+python legged_gym/scripts/play.py --task=go2_stand
+```
+
+To select a particular run/checkpoint, pass `--load_run <run-name>` and
+`--checkpoint <iteration>`.
+
 View training metrics in TensorBoard:
 
 ```bash

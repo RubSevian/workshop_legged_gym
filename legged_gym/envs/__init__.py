@@ -48,6 +48,8 @@ from .go2_stand.go2_config import Go2RoughCfg, Go2RoughCfgPPO
 from .go2_stand.go2 import Go2
 from .go2_walk.go2 import Go2_Walk
 from .go2_walk.go2_config import Go2_Walk_Cfg , Go2_Walk_CfgPPO
+from .go2_tumbler.go2_tumbler import Go2Tumbler
+from .go2_tumbler.go2_tumbler_config import Go2TumblerCfg, Go2TumblerCfgPPO
 
 
 
@@ -59,3 +61,4 @@ task_registry.register( "cassie", Cassie, CassieRoughCfg(), CassieRoughCfgPPO() 
 task_registry.register( "go1", Go1, Go1RoughCfg(), Go1RoughCfgPPO() )
 task_registry.register( "go2_stand", Go2, Go2RoughCfg(), Go2RoughCfgPPO() )
 task_registry.register( "go2_walk",Go2_Walk,Go2_Walk_Cfg(),Go2_Walk_CfgPPO())
+task_registry.register("go2_tumbler", Go2Tumbler, Go2TumblerCfg(), Go2TumblerCfgPPO())

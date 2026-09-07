@@ -154,6 +154,16 @@ class LeggedRobot(BaseTask):
         """
         if len(env_ids) == 0:
             return
+        # Actuator strength is fixed for one episode and sampled only when an
+        # environment resets, never on individual simulation timesteps.
+        if getattr(self.cfg.domain_rand, "randomize_motor_strength", False):
+            self.motor_strengths[env_ids] = torch_rand_float(
+                self.cfg.domain_rand.motor_strength_range[0],
+                self.cfg.domain_rand.motor_strength_range[1],
+                (len(env_ids), self.num_actions), device=self.device,
+            )
+        else:
+            self.motor_strengths[env_ids] = 1.0
         # update curriculum
         if self.cfg.terrain.curriculum:
             self._update_terrain_curriculum(env_ids)
@@ -310,6 +320,15 @@ class LeggedRobot(BaseTask):
         if self.cfg.domain_rand.randomize_pd_gains:
             self.p_gains_multiplier[env_id, :] = torch_rand_float(self.cfg.domain_rand.stiffness_multiplier_range[0], self.cfg.domain_rand.stiffness_multiplier_range[1], (1,self.num_actions), device=self.device)
             self.d_gains_multiplier[env_id, :] =  torch_rand_float(self.cfg.domain_rand.damping_multiplier_range[0], self.cfg.domain_rand.damping_multiplier_range[1], (1,self.num_actions), device=self.device)   
+
+        # This callback is called while environments are created. The same
+        # per-joint coefficients are resampled in reset_idx() per episode.
+        if getattr(self.cfg.domain_rand, "randomize_motor_strength", False):
+            self.motor_strengths[env_id, :] = torch_rand_float(
+                self.cfg.domain_rand.motor_strength_range[0],
+                self.cfg.domain_rand.motor_strength_range[1],
+                (1, self.num_actions), device=self.device,
+            )
         
 
         for i in range(len(props)):
@@ -411,6 +430,8 @@ class LeggedRobot(BaseTask):
             torques = self._compute_p_control_torques(
                 actions_scaled, self.dof_pos, self.dof_vel
             )
+            # Strength changes the unsaturated PD torque, before clipping.
+            torques = torques * self.motor_strengths
         elif control_type=="V":
             effective_p_gains = self.p_gains.unsqueeze(0) * self.p_gains_multiplier
             effective_d_gains = self.d_gains.unsqueeze(0) * self.d_gains_multiplier
@@ -737,6 +758,8 @@ class LeggedRobot(BaseTask):
         self.joint_armatures = torch.zeros(self.num_envs, 1, dtype=torch.float, device=self.device,requires_grad=False)  
             
         self.torque_multiplier = torch.ones(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,
+                                          requires_grad=False)
+        self.motor_strengths = torch.ones(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,
                                           requires_grad=False)
         self.motor_zero_offsets = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device,
                                          requires_grad=False) 
