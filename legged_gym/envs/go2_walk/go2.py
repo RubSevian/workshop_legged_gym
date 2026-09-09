@@ -1,5 +1,6 @@
 from legged_gym.envs import LeggedRobot
 from isaacgym import gymtorch
+from isaacgym.torch_utils import quat_rotate_inverse
 
 import torch
 
@@ -158,6 +159,8 @@ class Go2_Walk(LeggedRobot):
     def reset_idx(self, env_ids):
         super().reset_idx(env_ids)
         self.last_last_actions[env_ids] = 0.0
+        self.gait_phase[env_ids] = 0.0
+        self.was_moving[env_ids] = False
         self.obs_history[env_ids] = 0.0
         self.history_needs_init[env_ids] = True
 
@@ -169,6 +172,25 @@ class Go2_Walk(LeggedRobot):
             self.num_envs, self.num_bodies, 13
         )
         self.last_last_actions = torch.zeros_like(self.actions)
+        # Unlike episode time, this clock is part of the locomotion state. It
+        # is reset while standing, so zero commands always expose the same
+        # sin/cos pair and cannot drive periodic leg motion.
+        self.gait_phase = torch.zeros(
+            self.num_envs, dtype=torch.float, device=self.device
+        )
+        self.was_moving = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self.nominal_foot_xy = torch.tensor(
+            list(
+                zip(
+                    self.cfg.rewards.nominal_foot_x,
+                    self.cfg.rewards.nominal_foot_y,
+                )
+            ),
+            dtype=torch.float,
+            device=self.device,
+        )
         self.obs_history = torch.zeros(
             self.num_envs,
             self.cfg.env.history_length,
@@ -185,9 +207,61 @@ class Go2_Walk(LeggedRobot):
         )
 
     def _get_phase(self):
-        return torch.remainder(
-            self.episode_length_buf * self.dt / self.cfg.rewards.cycle_time,
+        return self.gait_phase
+
+    def _post_physics_step_callback(self):
+        """Run the base callback, then advance only active gait clocks."""
+        super()._post_physics_step_callback()
+        moving = self._is_moving_command()
+        continuing = moving & self.was_moving
+        self.gait_phase[~moving] = 0.0
+        self.gait_phase[moving & ~self.was_moving] = 0.0
+        self.gait_phase[continuing] = torch.remainder(
+            self.gait_phase[continuing]
+            + self.dt / self.cfg.rewards.cycle_time,
             1.0,
+        )
+        self.was_moving[:] = moving
+
+    def _resample_commands(self, env_ids):
+        """Sample locomotion commands with explicit full stand intervals."""
+        super()._resample_commands(env_ids)
+        if len(env_ids) == 0:
+            return
+
+        # The base sampler removes small linear commands but not small yaw.
+        # Use the same yaw dead zone as the moving/standing classifier.
+        if not self.cfg.commands.heading_command:
+            yaw_active = (
+                torch.abs(self.commands[env_ids, 2])
+                > self.cfg.commands.yaw_deadzone
+            )
+            self.commands[env_ids, 2] *= yaw_active
+
+        stand = (
+            torch.rand(len(env_ids), device=self.device)
+            < self.cfg.commands.stand_probability
+        )
+        stand_ids = env_ids[stand]
+        self.commands[stand_ids, :3] = 0.0
+
+    def _push_robots(self):
+        """Apply training pushes only where they do not conflict with stand."""
+        if self.cfg.domain_rand.push_standing:
+            push_ids = torch.arange(self.num_envs, device=self.device)
+        else:
+            push_ids = self._is_moving_command().nonzero(
+                as_tuple=False
+            ).flatten()
+        if len(push_ids) == 0:
+            return
+
+        max_velocity = self.cfg.domain_rand.max_push_vel_xy
+        self.root_states[push_ids, 7:9] = (
+            2.0 * torch.rand(len(push_ids), 2, device=self.device) - 1.0
+        ) * max_velocity
+        self.gym.set_actor_root_state_tensor(
+            self.sim, gymtorch.unwrap_tensor(self.root_states)
         )
 
     def _is_moving_command(self):
@@ -226,6 +300,53 @@ class Go2_Walk(LeggedRobot):
         )
         return swing_weight * self._is_moving_command().unsqueeze(1)
 
+    def _get_swing_progress(self):
+        """Return per-foot 0..1 progress through its scheduled swing."""
+        phase = self._get_phase()
+        diagonal_a = torch.clamp(2.0 * (phase - 0.5), min=0.0, max=1.0)
+        diagonal_b = torch.clamp(2.0 * phase, min=0.0, max=1.0)
+        return torch.stack(
+            (diagonal_a, diagonal_b, diagonal_b, diagonal_a), dim=1
+        )
+
+    def _get_foot_positions_in_base(self):
+        """Return FL, FR, RL, RR foot positions in the base frame."""
+        relative_world = (
+            self.rigid_state[:, self.gait_foot_indices, :3]
+            - self.root_states[:, None, :3]
+        )
+        base_quat = self.base_quat[:, None, :].expand(-1, 4, -1)
+        return quat_rotate_inverse(
+            base_quat.reshape(-1, 4), relative_world.reshape(-1, 3)
+        ).view(self.num_envs, 4, 3)
+
+    def _get_target_foot_xy(self):
+        """Raibert-style touchdown targets in the base frame."""
+        nominal = self.nominal_foot_xy.unsqueeze(0).expand(
+            self.num_envs, -1, -1
+        )
+        desired_velocity = self.commands[:, None, :2].expand(-1, 4, -1).clone()
+
+        # A yaw command produces the tangential foot velocity omega x r.
+        yaw_rate = self.commands[:, 2].unsqueeze(1)
+        desired_velocity[:, :, 0] -= yaw_rate * nominal[:, :, 1]
+        desired_velocity[:, :, 1] += yaw_rate * nominal[:, :, 0]
+
+        velocity_error = (
+            self.commands[:, :2] - self.base_lin_vel[:, :2]
+        ).unsqueeze(1)
+        stance_duration = 0.5 * self.cfg.rewards.cycle_time
+        offset = (
+            0.5 * stance_duration * desired_velocity
+            + self.cfg.rewards.foot_placement_velocity_gain * velocity_error
+        )
+        offset = torch.clamp(
+            offset,
+            min=-self.cfg.rewards.foot_placement_max_offset,
+            max=self.cfg.rewards.foot_placement_max_offset,
+        )
+        return nominal + offset
+
     def _get_foot_terrain_heights(self):
         """Maximum nearby terrain height for each foot."""
         if self.cfg.terrain.mesh_type == "plane":
@@ -257,7 +378,10 @@ class Go2_Walk(LeggedRobot):
             self.contact_forces[:, self.gait_foot_indices, 2]
             > self.cfg.rewards.contact_force_threshold
         )
-        return torch.mean((contact == self._get_gait_phase()).float(), dim=1)
+        gait_match = torch.mean(
+            (contact == self._get_gait_phase()).float(), dim=1
+        )
+        return gait_match * self._is_moving_command()
 
     def _reward_feet_clearance(self):
         swing_weight = self._get_swing_weight()
@@ -292,6 +416,41 @@ class Go2_Walk(LeggedRobot):
         )
         return torch.mean(foot_speed_xy_sq * contact.float(), dim=1)
 
+    def _reward_foot_placement(self):
+        """Place each foot near a velocity-aware target before touchdown."""
+        foot_xy = self._get_foot_positions_in_base()[:, :, :2]
+        target_xy = self._get_target_foot_xy()
+        error_sq = torch.sum(torch.square(foot_xy - target_xy), dim=2)
+        normalized_error = torch.clamp(
+            error_sq / self.cfg.rewards.foot_placement_sigma ** 2,
+            min=0.0,
+            max=1.0,
+        )
+
+        # Early swing remains free for obstacle clearance. The target becomes
+        # important near touchdown, when leaving a rear foot behind is harmful.
+        touchdown_weight = (
+            self._get_swing_weight() * torch.square(self._get_swing_progress())
+        )
+        return torch.mean(normalized_error * touchdown_weight, dim=1)
+
+    def _reward_rear_foot_extension(self):
+        """Soft one-sided limit preventing rear feet trailing too far back."""
+        rear_x = self._get_foot_positions_in_base()[:, 2:4, 0]
+        rear_limit = (
+            self.nominal_foot_xy[2:4, 0]
+            - self.cfg.rewards.rear_foot_max_extension
+        )
+        excess = torch.clamp(rear_limit.unsqueeze(0) - rear_x, min=0.0)
+        normalized_excess = torch.clamp(
+            torch.square(
+                excess / self.cfg.rewards.rear_foot_extension_sigma
+            ),
+            min=0.0,
+            max=1.0,
+        )
+        return torch.mean(normalized_excess, dim=1) * self._is_moving_command()
+
     def _reward_hip_inward(self):
         """Penalize only hip motion toward the body center."""
         signed_hip_angle = (
@@ -325,12 +484,25 @@ class Go2_Walk(LeggedRobot):
 
     def _reward_stand_still(self):
         zero_command = ~self._is_moving_command()
-        joint_motion = torch.mean(
-            torch.abs(self.dof_pos - self.default_dof_pos), dim=1
+        joint_position = torch.mean(
+            torch.square(self.dof_pos - self.default_dof_pos), dim=1
+        )
+        joint_velocity = torch.mean(torch.square(self.dof_vel), dim=1)
+        foot_velocity = torch.mean(
+            torch.sum(
+                torch.square(
+                    self.rigid_state[:, self.gait_foot_indices, 7:10]
+                ),
+                dim=2,
+            ),
+            dim=1,
         )
         base_motion = (
             torch.sum(torch.square(self.base_lin_vel), dim=1)
             + 0.5 * torch.sum(torch.square(self.base_ang_vel), dim=1)
+        )
+        action_rate = torch.mean(
+            torch.square(self.actions - self.last_actions), dim=1
         )
         contacts = (
             self.contact_forces[:, self.gait_foot_indices, 2]
@@ -338,5 +510,10 @@ class Go2_Walk(LeggedRobot):
         )
         missing_feet = torch.mean((~contacts).float(), dim=1)
         return (
-            joint_motion + base_motion + missing_feet
+            self.cfg.rewards.stand_joint_pos_weight * joint_position
+            + self.cfg.rewards.stand_joint_vel_weight * joint_velocity
+            + self.cfg.rewards.stand_foot_vel_weight * foot_velocity
+            + self.cfg.rewards.stand_base_vel_weight * base_motion
+            + self.cfg.rewards.stand_action_rate_weight * action_rate
+            + self.cfg.rewards.stand_missing_contact_weight * missing_feet
         ) * zero_command
