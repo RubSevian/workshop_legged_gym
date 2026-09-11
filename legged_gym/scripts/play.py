@@ -32,11 +32,23 @@ from legged_gym import LEGGED_GYM_ROOT_DIR
 import os
 
 import isaacgym
+from isaacgym import gymtorch
 from legged_gym.envs import *
 from legged_gym.utils import  get_args, export_policy_as_jit, task_registry, Logger
 
 import numpy as np
 import torch
+
+
+def _set_go2_walk_zero_command(env):
+    """Force zero commands into both the environment and its actor history."""
+    if env.cfg.env.num_single_observations != 45:
+        raise RuntimeError("--zero_command currently supports only go2_walk")
+    env.commands[:, :3] = 0.0
+    # go2_walk frame: angular velocity (0:3), gravity (3:6), command (6:9).
+    env.obs_history[:, :, 6:9] = 0.0
+    env.obs_buf = env.obs_history.reshape(env.num_envs, -1)
+    return env.obs_buf
 
 
 def play(args):
@@ -49,10 +61,49 @@ def play(args):
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.push_robots = False
+    if args.zero_command:
+        if args.task != "go2_walk":
+            raise ValueError("--zero_command is currently supported only for --task=go2_walk")
+        # This mode isolates the policy's zero-command behavior from slopes,
+        # reset velocity and domain randomization.
+        env_cfg.terrain.mesh_type = "plane"
+        env_cfg.terrain.curriculum = False
+        env_cfg.terrain.measure_heights = True
+        env_cfg.commands.resampling_time = 1.0e6
+        env_cfg.domain_rand.randomize_base_mass = False
+        env_cfg.domain_rand.randomize_link_mass = False
+        env_cfg.domain_rand.randomize_base_com = False
+        env_cfg.domain_rand.randomize_pd_gains = False
+        env_cfg.domain_rand.randomize_motor_strength = False
+        env_cfg.domain_rand.randomize_motor_zero_offset = False
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
-    obs = env.get_observations()
+    if args.zero_command:
+        # The base reset normally deliberately introduces random velocity and
+        # joint pose. Remove those disturbances only for this diagnostic.
+        env.root_states[:, 7:13] = 0.0
+        env.dof_pos[:] = env.default_dof_pos
+        env.dof_vel[:] = 0.0
+        env.actions[:] = 0.0
+        env.last_actions[:] = 0.0
+        env.last_dof_vel[:] = 0.0
+        env.last_root_vel[:] = 0.0
+        env.base_lin_vel[:] = 0.0
+        env.base_ang_vel[:] = 0.0
+        env.gym.set_actor_root_state_tensor(
+            env.sim, gymtorch.unwrap_tensor(env.root_states)
+        )
+        env.gym.set_dof_state_tensor(env.sim, gymtorch.unwrap_tensor(env.dof_state))
+        # Unlike training, playback has not taken its first simulation step
+        # yet. Populate the critic's 187-point terrain scan before building
+        # the initial observation.
+        env.measured_heights = env._get_heights()
+        env.compute_observations()
+        obs = _set_go2_walk_zero_command(env)
+        initial_base_position = env.root_states[0, :3].clone()
+    else:
+        obs = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
     ppo_runner, train_cfg = task_registry.make_alg_runner(env=env, name=args.task, args=args, train_cfg=train_cfg)
@@ -74,7 +125,12 @@ def play(args):
     camera_direction = np.array(env_cfg.viewer.lookat) - np.array(env_cfg.viewer.pos)
     img_idx = 0
 
-    for i in range(10*int(env.max_episode_length)):
+    num_steps = args.max_steps
+    if num_steps is None:
+        num_steps = int(env.max_episode_length) if args.zero_command else 10 * int(env.max_episode_length)
+    for i in range(num_steps):
+        if args.zero_command:
+            obs = _set_go2_walk_zero_command(env)
         actions = policy(obs.detach())
         obs, _, rews, dones, infos = env.step(actions.detach())
         if RECORD_FRAMES:
@@ -112,6 +168,15 @@ def play(args):
                     logger.log_rewards(infos["episode"], num_episodes)
         elif i==stop_rew_log:
             logger.print_rewards()
+
+    if args.zero_command:
+        displacement = env.root_states[0, :2] - initial_base_position[:2]
+        print(
+            "[zero-command] horizontal displacement: "
+            f"{torch.linalg.vector_norm(displacement).item():.4f} m; "
+            "final body-frame velocity: "
+            f"{env.base_lin_vel[0, :2].detach().cpu().tolist()} m/s"
+        )
 
 if __name__ == '__main__':
     EXPORT_POLICY = True

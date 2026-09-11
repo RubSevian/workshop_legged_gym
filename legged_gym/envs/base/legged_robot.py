@@ -140,6 +140,8 @@ class LeggedRobot(BaseTask):
             self.projected_gravity[env_ids] = quat_rotate_inverse(
                 self.base_quat[env_ids], self.gravity_vec[env_ids]
             )
+            if self.cfg.terrain.measure_heights:
+                self.measured_heights[env_ids] = self._get_heights(env_ids)
         self.compute_observations() # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
         self.last_actions[:] = self.actions[:]
@@ -919,12 +921,13 @@ class LeggedRobot(BaseTask):
         Returns:
             [type]: [description]
         """
+        num_envs = self.num_envs if env_ids is None else len(env_ids)
         if self.cfg.terrain.mesh_type == 'plane':
-            return torch.zeros(self.num_envs, self.num_height_points, device=self.device, requires_grad=False)
+            return torch.zeros(num_envs, self.num_height_points, device=self.device, requires_grad=False)
         elif self.cfg.terrain.mesh_type == 'none':
             raise NameError("Can't measure height with terrain mesh type 'none'")
 
-        if env_ids:
+        if env_ids is not None:
             points = quat_apply_yaw(self.base_quat[env_ids].repeat(1, self.num_height_points), self.height_points[env_ids]) + (self.root_states[env_ids, :3]).unsqueeze(1)
         else:
             points = quat_apply_yaw(self.base_quat.repeat(1, self.num_height_points), self.height_points) + (self.root_states[:, :3]).unsqueeze(1)
@@ -942,7 +945,7 @@ class LeggedRobot(BaseTask):
         heights = torch.min(heights1, heights2)
         heights = torch.min(heights, heights3)
 
-        return heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
+        return heights.view(num_envs, -1) * self.terrain.cfg.vertical_scale
 
     #------------ reward functions----------------
     def _reward_lin_vel_z(self):
@@ -1015,8 +1018,6 @@ class LeggedRobot(BaseTask):
         # Reward long steps
         # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
         contact = self.contact_forces[:, self.feet_indices, 2] > 1.
-        print(contact)
-        print(self.last_contacts)
         contact_filt = torch.logical_or(contact, self.last_contacts) 
         self.last_contacts = contact
         first_contact = (self.feet_air_time > 0.) * contact_filt

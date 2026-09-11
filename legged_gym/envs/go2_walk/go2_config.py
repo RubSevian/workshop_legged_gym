@@ -3,14 +3,14 @@ from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg, LeggedRobot
 
 class Go2_Walk_Cfg(LeggedRobotCfg):
     class env(LeggedRobotCfg.env):
-        # One frame contains proprioception, commands, the previous action and
-        # the gait clock. Five frames give the policy short-term dynamics.
-        num_single_observations = 47
+        # Paper observation: angular velocity, projected gravity, command,
+        # joint position/velocity and previous action. Keep five-frame history.
+        num_single_observations = 45
         history_length = 5
         num_observations = num_single_observations * history_length
-        # Actor history already contains gait sin/cos in every frame. The
-        # remaining privileged values are true velocity, contacts and terrain.
+        # Critic-only values: true linear velocity, contacts and terrain scan.
         num_privileged_obs = num_observations + 3 + 4 + 187
+        num_envs = 4096
         episode_length_s = 20
 
     class terrain(LeggedRobotCfg.terrain):
@@ -67,7 +67,7 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         # PD Drive parameters:
         control_type = 'P'
         stiffness = {'joint': 20.}  # [N*m/rad]
-        damping = {'joint': 1.}     # [N*m*s/rad]
+        damping = {'joint': 1.}    # [N*m*s/rad]
         # action scale: target angle = actionScale * action + defaultAngle
         action_scale = 0.25
         # decimation: Number of control action updates @ sim DT per policy DT
@@ -90,63 +90,40 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
 
     class rewards(LeggedRobotCfg.rewards):
         tracking_sigma = 0.25
-        base_height_target = 0.32
-        cycle_time = 0.5
-        gait_transition_margin = 0.2
-        command_dead = 0.1
+        base_height_target = 0.35
         contact_force_threshold = 5.0
-        # Matches the collision sphere in resources/robots/go2/urdf/go2.urdf.
+        soft_dof_pos_limit = 0.95
+        min_feet_air_time = 0.10
+        target_foot_height = 0.10
+        # Radius of the Go2's spherical foot collision geometry [m].
         foot_radius = 0.022
-        min_outward_hip_angle = 0.05
-        soft_dof_pos_limit = 0.9
+        # At a strictly zero command, keep all 12 joints near
+        # init_state.default_joint_angles. The pose cost is bounded by this
+        # value, so it remains informative with only_positive_rewards.
+        stand_joint_position_weight = 2.0
+        stand_joint_position_tolerance = 0.15  # mean joint error [rad]
         only_positive_rewards = True
-        target_foot_height = 0.08
-        max_contact_force = 120.
-
-        # Nominal Go2 footholds in the base frame, ordered FL, FR, RL, RR.
-        # The placement reward does not force the feet to these exact points:
-        # it adds a Raibert-style velocity/yaw offset and acts mostly near the
-        # end of swing. Values match the default pose used above.
-        nominal_foot_x = [0.18, 0.18, -0.21, -0.21]
-        nominal_foot_y = [0.17, -0.17, 0.17, -0.17]
-        foot_placement_velocity_gain = 0.08
-        foot_placement_max_offset = 0.12
-        foot_placement_sigma = 0.12
-        rear_foot_max_extension = 0.14
-        rear_foot_extension_sigma = 0.08
-
-        # Relative weights inside the zero-command motion penalty. They are
-        # kept in the config so the behavior can be tuned from TensorBoard
-        # without changing the reward implementation.
-        stand_joint_pos_weight = 0.5
-        stand_joint_vel_weight = 0.05
-        stand_foot_vel_weight = 1.0
-        stand_base_vel_weight = 1.0
-        stand_action_rate_weight = 0.25
-        stand_missing_contact_weight = 1.0
 
         class scales(LeggedRobotCfg.rewards.scales):
-            tracking_lin_vel = 1.5
-            tracking_ang_vel = 0.75
-            lin_vel_z = -2.0
+            # Source: DerSimi/unitree_go2_sim2real walker_policy.  Positive
+            # terms define motion; the remaining terms make it economical and
+            # symmetric without imposing an explicit phase or gait template.
+            tracking_lin_vel = 1.0
+            tracking_ang_vel = 0.5
+            lin_vel_z = -0.5
             ang_vel_xy = -0.05
-            orientation = -1.0
-            base_height = -1.0
-            gait_contact = 0.5
-            feet_clearance = -15.0
-            foot_drag = -0.5
+            orientation = -5.0
+            dof_pos_limits = -1.0
+            pose = 0.5
+            termination = -1.0
+            stand_still = -1.0
+            torques = -0.0002
+            action_rate = -0.01
+            energy = -0.001
+            feet_clearance = -2.0
+            feet_height = -0.2
             foot_slip = -0.1
-            hip_inward = -0.05
-            collision = -1.0
-            termination = -10.0
-            torques = -2e-4
-            dof_acc = -2.5e-7
-            dof_pos_limits = -10.0
-            feet_contact_forces = -0.01
-            smoothness = -0.02
-            foot_placement = -0.5
-            rear_foot_extension = -0.4
-            stand_still = -2.0
+            feet_air_time = 0.1
 
     class commands(LeggedRobotCfg.commands):
         curriculum = False
@@ -154,42 +131,39 @@ class Go2_Walk_Cfg(LeggedRobotCfg):
         num_commands = 4 # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         resampling_time = 5.
         heading_command = False
-        # A continuous sampler almost never generates an exact zero command.
-        # Reserve complete command intervals for learning a true stand mode.
-        stand_probability = 0.25
-        yaw_deadzone = 0.1
+        # Fraction of complete command intervals set to [vx, vy, yaw] = 0.
+        # The other intervals retain the unmodified parent sampler distribution.
+        zero_command_probability = 0.15
         class ranges(LeggedRobotCfg.commands.ranges):
-            lin_vel_x = [-0.6, 0.8]
-            lin_vel_y = [-0.4, 0.4]
-            ang_vel_yaw = [-0.6, 0.6]
+            # Current task command envelope; sampling remains the standard
+            # Legged-Gym implementation in the parent class.
+            lin_vel_x = [-1., 1.]
+            lin_vel_y = [-0.5, 0.5]
+            ang_vel_yaw = [-0.50, 0.50]
             heading = [-3.14, 3.14]
 
     class domain_rand(LeggedRobotCfg.domain_rand):
         debug_randomization = False
         debug_randomization_envs = 3
         randomize_friction = True
-        friction_range = [0.5, 1.15]
+        friction_range = [0.5, 1.5]
         randomize_base_mass = True
-        added_base_mass_range = [-2, 2]
+        added_base_mass_range = [-1.0, 1.0]
         push_robots = True
-        push_interval_s = 5
-        max_push_vel_xy = 0.5
-        max_push_ang_vel = 0.25
-        # Command resampling also happens every five seconds. Pushing a robot
-        # on the exact step it receives a stand command teaches recovery steps,
-        # which conflicts with the requested motionless stand behavior.
-        push_standing = False
+        push_interval_s = 4
+        max_push_vel_xy = 0.4
+        max_push_ang_vel = 0.6
         randomize_link_mass = True
-        multiplied_link_mass_range = [0.8, 1.2]
+        multiplied_link_mass_range = [0.9, 1.1]
 
         randomize_base_com = True
         added_base_com_range = [-0.03, 0.03]
         randomize_pd_gains = True
-        stiffness_multiplier_range = [0.8, 1.2]
-        damping_multiplier_range = [0.7, 1.3]
+        stiffness_multiplier_range = [0.9, 1.1]
+        damping_multiplier_range = [0.9, 1.1]
 
         randomize_motor_strength = True
-        motor_strength_range = [0.85, 1.15]
+        motor_strength_range = [0.8, 1.2]
 
         randomize_motor_zero_offset = True
         motor_zero_offset_range = [-0.035, 0.035]
@@ -206,5 +180,6 @@ class Go2_Walk_CfgPPO(LeggedRobotCfgPPO):
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'go2_walk'
-        num_steps_per_env = 60 # per iteration
+        num_steps_per_env = 24
         max_iterations = 10000
+        save_interval = 100

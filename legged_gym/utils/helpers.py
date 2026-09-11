@@ -159,6 +159,7 @@ def get_args():
         {"name": "--checkpoint", "type": int,  "help": "Saved model checkpoint number. If -1: will load the last checkpoint. Overrides config file if provided."},
         {"name": "--checkpoint_path", "type": str, "help": "Path to a checkpoint .pt file (used by play_go2_tumbler.py)."},
         {"name": "--max_steps", "type": int, "help": "Maximum simulation steps for playback. Omit for one episode."},
+        {"name": "--zero_command", "action": "store_true", "default": False, "help": "For go2_walk playback: hold [vx, vy, yaw] at zero on a flat, deterministic scene."},
         
         {"name": "--headless", "action": "store_true", "default": False, "help": "Force display off at all times"},
         {"name": "--horovod", "action": "store_true", "default": False, "help": "Use horovod for multi-gpu training"},
